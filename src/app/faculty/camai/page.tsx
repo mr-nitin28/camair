@@ -107,6 +107,76 @@ interface Message {
   dataCard?: DataCard;
 }
 
+function RichTextRenderer({ text, isUser }: { text: string; isUser: boolean }) {
+  const lines = text.split('\n');
+  const elements: React.ReactNode[] = [];
+  let currentListItems: string[] = [];
+
+  const flushList = (key: string | number) => {
+    if (currentListItems.length > 0) {
+      elements.push(
+        <ul key={`list-${key}`} className="my-2 space-y-1.5 pl-1">
+          {currentListItems.map((item, itemIdx) => {
+            const parsedItem = parseBold(item);
+            return (
+              <li key={itemIdx} className="flex items-start gap-2 text-sm leading-relaxed">
+                <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full shrink-0 text-[10px] mt-0.5 ${
+                  isUser ? 'bg-indigo-700 text-white font-bold' : 'bg-emerald-50 text-emerald-600 font-bold'
+                }`}>
+                  ✓
+                </span>
+                <span className="flex-1">{parsedItem}</span>
+              </li>
+            );
+          })}
+        </ul>
+      );
+      currentListItems = [];
+    }
+  };
+
+  const parseBold = (inputText: string): React.ReactNode[] => {
+    const parts = inputText.split('**');
+    return parts.map((part, index) => {
+      if (index % 2 === 1) {
+        return (
+          <strong
+            key={index}
+            className={`font-bold ${isUser ? 'text-white underline underline-offset-2 decoration-indigo-200' : 'text-emerald-950 bg-emerald-50/50 px-1 py-0.5 rounded'}`}
+          >
+            {part}
+          </strong>
+        );
+      }
+      return part;
+    });
+  };
+
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
+      const itemText = trimmed.replace(/^[\*\-]\s+/, '');
+      currentListItems.push(itemText);
+    } else {
+      flushList(index);
+
+      if (trimmed === '') {
+        elements.push(<div key={`spacer-${index}`} className="h-2" />);
+      } else {
+        elements.push(
+          <p key={`p-${index}`} className="text-sm leading-relaxed font-medium">
+            {parseBold(line)}
+          </p>
+        );
+      }
+    }
+  });
+
+  flushList('final');
+
+  return <div className="space-y-1">{elements}</div>;
+}
+
 // --- MOCK DATA ---
 const mockSubjects: Subject[] = [
   { id: 'sub-cd', code: 'CS-601', name: 'Compiler Design' },
@@ -189,10 +259,10 @@ const mockFacultyActivities: FacultyActivity[] = [
 
 // --- WORKSPACE FEATURE TABS ---
 const WORKSPACE_TABS = [
-  { id: 'ai', label: 'CamAI Faculty Helper', icon: Sparkles, gradient: 'from-emerald-500 to-teal-600', meta: 'Online', online: true },
-  { id: 'notes', label: 'Upload Lectures Hub', icon: FileText, gradient: 'from-indigo-500 to-indigo-700', meta: 'Study Guides', online: false },
-  { id: 'announcements', label: 'Faculty Bulletins', icon: Megaphone, gradient: 'from-amber-500 to-amber-600', meta: 'Circulars', online: false },
-  { id: 'activities', label: 'Meetings & Schedule', icon: Calendar, gradient: 'from-rose-500 to-rose-600', meta: 'Duties', online: false },
+  { id: 'ai', label: 'CamAI Faculty Helper', icon: Bot, isSolid: true, color: 'bg-emerald-600', gradient: '', meta: 'Online', online: true },
+  { id: 'notes', label: 'Upload Lectures Hub', icon: FileText, isSolid: false, color: '', gradient: 'from-indigo-500 to-indigo-700', meta: 'Study Guides', online: false },
+  { id: 'announcements', label: 'Faculty Bulletins', icon: Megaphone, isSolid: false, color: '', gradient: 'from-amber-500 to-amber-600', meta: 'Circulars', online: false },
+  { id: 'activities', label: 'Meetings & Schedule', icon: Calendar, isSolid: false, color: '', gradient: 'from-rose-500 to-rose-600', meta: 'Duties', online: false },
 ] as const;
 
 // --- AI RESPONSES GENERATOR ---
@@ -259,12 +329,12 @@ const getAIResponse = (userPrompt: string): { text: string; dataCard?: DataCard 
 
   if (prompt.includes('hi') || prompt.includes('hello') || prompt.includes('hey') || prompt.includes('help') || prompt.includes('start')) {
     return {
-      text: `Hello Dr. Priya! I am **CamAI Faculty Assistant**. I am ready to pull data cards for you. Try asking me about:\n\n* **Teaching Schedule** (classes, timetables)\n* **Student Attendance** (students at risk, shortage alerts)\n* **Leave Approvals** (pending student leaves)\n* **Exam Duties** (invigilations, grading deadlines)\n\nChoose an action below or type a query!`
+      text: `Hello Dr. Priya! I am **CamAI Faculty Assistant**. I am ready to pull data cards for you. Try asking me about:\n\n* **Teaching Schedule** (classes and timetables)\n* **Student Attendance** (students at risk & shortage alerts)\n* **Leave Approvals** (pending student leaves)\n* **Exam Duties** (invigilations and grading deadlines)\n\nChoose an action below or type a query!`
     };
   }
 
   return {
-    text: `I've analyzed your query regarding "${userPrompt}". \n\nAs a faculty assistant tool, I can look up academic schedules, student directories, or exam invigilation rosters. Try typing keywords like **Schedule, Student, Leave, or Exams** to view the metrics!`,
+    text: `I've analyzed your query regarding "${userPrompt}".\n\nAs a faculty assistant tool, I can look up academic schedules, student directories, or exam invigilation rosters. Try typing keywords like **Schedule, Student, Leave, or Exams** to view the metrics!`,
   };
 };
 
@@ -570,7 +640,7 @@ function FacultyCamAIWorkspace() {
                   />
                 )}
 
-                <span className={`relative z-10 w-9 h-9 rounded-xl bg-gradient-to-br ${tab.gradient} flex items-center justify-center text-white shrink-0 shadow-sm`}>
+                <span className={`relative z-10 w-9 h-9 rounded-xl ${tab.isSolid ? tab.color : `bg-gradient-to-br ${tab.gradient}`} flex items-center justify-center text-white shrink-0 shadow-sm`}>
                   <Icon className="w-4.5 h-4.5 text-white" />
                   {tab.online && (
                     <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-white" />
@@ -584,7 +654,7 @@ function FacultyCamAIWorkspace() {
 
                 <span className="relative z-10 hidden sm:flex flex-col items-start leading-tight">
                   <span className="text-xs font-bold whitespace-nowrap text-slate-800">{tab.label}</span>
-                  <span className={`text-[9px] font-bold font-mono uppercase tracking-wide ${isActive ? 'text-indigo-600' : 'text-slate-400'}`}>
+                  <span className={`text-[9px] font-bold font-mono uppercase tracking-wide ${isActive ? (tab.id === 'ai' ? 'text-emerald-600' : 'text-indigo-600') : 'text-slate-400'}`}>
                     {tab.meta}
                   </span>
                 </span>
@@ -611,7 +681,7 @@ function FacultyCamAIWorkspace() {
                 {/* Inline chat header */}
                 <div className="px-6 py-3.5 bg-white/40 backdrop-blur-md border-b border-slate-200/80 flex items-center justify-between shrink-0">
                   <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-sm">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-600 flex items-center justify-center shadow-sm">
                       <Bot className="w-5 h-5 text-white" />
                     </div>
                     <div>
@@ -635,7 +705,7 @@ function FacultyCamAIWorkspace() {
                         {/* Avatar */}
                         <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-xs font-black uppercase shadow-sm border transition ${
                           msg.sender === 'user'
-                            ? 'bg-indigo-50 border-indigo-100 text-indigo-700'
+                            ? 'bg-slate-100 border-slate-200 text-slate-700'
                             : 'bg-emerald-50 border-emerald-100 text-emerald-700'
                         }`}>
                           {msg.sender === 'user' ? (
@@ -647,14 +717,12 @@ function FacultyCamAIWorkspace() {
 
                         {/* Bubble Area */}
                         <div className="space-y-2">
-                          <div className={`p-4 rounded-2xl text-xs font-medium leading-relaxed shadow-sm border ${
+                          <div className={`p-4 rounded-2xl text-sm shadow-sm border transition-all duration-200 ${
                             msg.sender === 'user'
-                              ? 'bg-gradient-to-br from-indigo-600 to-indigo-750 text-white border-indigo-500/30 rounded-tr-none'
+                              ? 'bg-emerald-600 text-white border-emerald-500 rounded-tr-none'
                               : 'bg-white text-slate-800 border-slate-100 rounded-tl-none'
                           }`}>
-                            {msg.text.split('\n').map((line, idx) => (
-                              <p key={idx} className={idx > 0 ? 'mt-1.5' : ''}>{line}</p>
-                            ))}
+                            <RichTextRenderer text={msg.text} isUser={msg.sender === 'user'} />
                           </div>
 
                           {/* Data card render */}
@@ -664,7 +732,7 @@ function FacultyCamAIWorkspace() {
                                 {msg.dataCard.type === 'classes' && <Award className="w-4 h-4 text-emerald-600" />}
                                 {msg.dataCard.type === 'students_risk' && <ClipboardList className="w-4 h-4 text-rose-600" />}
                                 {msg.dataCard.type === 'pending_leaves' && <Calendar className="w-4 h-4 text-amber-600" />}
-                                {msg.dataCard.type === 'exams_logistics' && <Award className="w-4 h-4 text-indigo-650" />}
+                                {msg.dataCard.type === 'exams_logistics' && <Award className="w-4 h-4 text-emerald-600" />}
                                 <span className="font-extrabold tracking-tight">{msg.dataCard.title}</span>
                               </h4>
 
@@ -725,7 +793,7 @@ function FacultyCamAIWorkspace() {
                                       <span className="font-bold text-slate-800 block leading-tight">{item.event}</span>
                                       <div className="flex justify-between items-center text-[10px] text-slate-500 font-mono mt-2 font-semibold">
                                         <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-slate-400" /> {item.time}</span>
-                                        <span className="bg-indigo-50 border border-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-[9px] font-sans font-bold">{item.detail}</span>
+                                        <span className="bg-emerald-50 border border-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded text-[9px] font-sans font-bold">{item.detail}</span>
                                       </div>
                                     </div>
                                   ))}
@@ -798,12 +866,12 @@ function FacultyCamAIWorkspace() {
                       value={aiInput}
                       onChange={(e) => setAiInput(e.target.value)}
                       placeholder="Ask CamAI faculty assistant..."
-                      className="flex-1 bg-white border border-slate-200 rounded-2xl px-4 py-3 text-xs focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-medium text-slate-800 placeholder-slate-450 shadow-inner transition duration-200"
+                      className="flex-1 bg-white border border-slate-200 rounded-2xl px-4 py-3 text-xs focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 font-medium text-slate-800 placeholder-slate-450 shadow-inner transition duration-200"
                     />
                     <button
                       type="submit"
                       disabled={!aiInput.trim()}
-                      className="w-11 h-11 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-850 disabled:opacity-50 text-white rounded-2xl flex items-center justify-center transition shadow-md shadow-indigo-500/20 shrink-0 animate-scaleUp"
+                      className="w-11 h-11 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white rounded-2xl flex items-center justify-center transition shadow-md shadow-emerald-500/20 shrink-0 animate-scaleUp"
                     >
                       <Send className="w-5 h-5" />
                     </button>

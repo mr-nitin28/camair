@@ -27,7 +27,9 @@ import {
   RefreshCw,
   Plus,
   CreditCard,
-  Award
+  Award,
+  Bot,
+  MessageSquare
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -172,10 +174,10 @@ const mockActivities = [
 // --- WORKSPACE FEATURE TABS (top navigation) ---
 // Each tab maps to exactly one feature panel; gradients preserve per-feature identity.
 const WORKSPACE_TABS = [
-  { id: 'ai', label: 'CamAI Helper', icon: Sparkles, gradient: 'from-violet-500 to-indigo-600', meta: 'Online', online: true },
-  { id: 'notes', label: 'Study Notes Hub', icon: FileText, gradient: 'from-amber-500 to-orange-600', meta: 'Resources', online: false },
-  { id: 'announcements', label: 'Official Notices', icon: Megaphone, gradient: 'from-rose-500 to-red-600', meta: 'Broadcasts', online: false },
-  { id: 'activities', label: 'Campus Events', icon: Calendar, gradient: 'from-emerald-500 to-teal-600', meta: 'Live', online: false },
+  { id: 'ai', label: 'CamAI Helper', icon: Bot, isSolid: true, color: 'bg-emerald-600', gradient: '', meta: 'Online', online: true },
+  { id: 'notes', label: 'Study Notes Hub', icon: FileText, isSolid: false, color: '', gradient: 'from-amber-500 to-orange-600', meta: 'Resources', online: false },
+  { id: 'announcements', label: 'Official Notices', icon: Megaphone, isSolid: false, color: '', gradient: 'from-rose-500 to-red-600', meta: 'Broadcasts', online: false },
+  { id: 'activities', label: 'Campus Events', icon: Calendar, isSolid: false, color: '', gradient: 'from-emerald-500 to-teal-600', meta: 'Live', online: false },
 ] as const;
 
 // --- AI RESPONSES GENERATOR ---
@@ -243,14 +245,63 @@ const getAIResponse = (userPrompt: string, student: StudentProfile | null): { te
     };
   }
 
+  if (prompt.includes('attendance') || prompt.includes('present') || prompt.includes('percentage')) {
+    return {
+      text: `Here is your subject-wise attendance breakdown for the current semester:`,
+      dataCard: {
+        type: 'attendance',
+        title: 'Attendance Sheet',
+        items: [
+          { subject: 'Compiler Design', percentage: '88%', status: 'Safe' },
+          { subject: 'Computer Networks', percentage: '72%', status: 'Low Attendance' },
+          { subject: 'Software Engineering', percentage: '91%', status: 'Safe' },
+          { subject: 'Artificial Intelligence', percentage: '85%', status: 'Safe' },
+          { subject: 'Web Technologies', percentage: '95%', status: 'Safe' }
+        ]
+      }
+    };
+  }
+
+  if (prompt.includes('profile') || prompt.includes('details') || prompt.includes('who am i') || prompt.includes('student id')) {
+    return {
+      text: `Here are your primary student registration details from our campus registry:`,
+      dataCard: {
+        type: 'profile',
+        title: 'Student Profile Card',
+        fields: [
+          { label: 'Full Name', value: student ? `${student.first_name} ${student.last_name}` : 'Aarav Sharma' },
+          { label: 'Student ID', value: student?.student_id || 'STU-2023-0042' },
+          { label: 'Course Enrolled', value: student?.courses?.name || 'B.Tech Computer Science' },
+          { label: 'Department', value: student?.departments?.name || 'Computer Science & Engineering' },
+          { label: 'Official Email ID', value: student?.email || 'aarav.sharma@campusos.edu' }
+        ]
+      }
+    };
+  }
+
+  if (prompt.includes('library') || prompt.includes('book') || prompt.includes('fine')) {
+    return {
+      text: `Here is your library card status, listing currently checked out books and any outstanding dues:`,
+      dataCard: {
+        type: 'library',
+        title: 'Library Account Ledger',
+        items: [
+          { book: 'Introduction to Algorithms (Cormen)', dueDate: 'July 5th, 2026', status: 'Issued' },
+          { book: 'Computer Networks (Tanenbaum)', dueDate: 'Returned', status: 'Clear' },
+          { fine: 'Library Fine Dues', amount: '₹120', status: 'Pending Payment' }
+        ]
+      }
+    };
+  }
+
   if (prompt.includes('hi') || prompt.includes('hello') || prompt.includes('hey') || prompt.includes('help') || prompt.includes('start')) {
     return {
-      text: `Hello ${student?.first_name || 'Aarav'}! I am **CamAI**, your virtual campus assistant. I can help you with:\n\n* **Academic Performance** (CGPA, SGPA, grades)\n* **Exams** (Dates, schedules, venue details)\n* **Leaves & Attendance** (Approval statuses)\n* **Fee Status** (Invoices and outstanding dues)\n\nTry clicking one of the quick prompt buttons below or ask me any question directly!`
+      text: `Hello ${student?.first_name || 'Aarav'}! I am **CamAI**, your virtual campus assistant. I can help you with:\n\n* **Academic Performance** (CGPA, SGPA, grades)\n* **Exams** (Dates, schedules, venue details)\n* **Leaves & Attendance** (Approval status)\n* **Fee Status** (Invoices and outstanding dues)\n* **Attendance Ledger** (Course percentage stats)\n* **Student Profile** (Registration details)\n* **Library Account** (Issued books & fines)\n\nTry clicking one of the quick prompt buttons below or ask me any question directly!`
     };
   }
 
   return {
-    text: `I've analyzed your query regarding "${userPrompt}". \n\nAs a mock assistant for CampusOS, I can query database endpoints for grades, leaves, and financial ledgers. Try typing one of the keywords like **CGPA, Exams, Leave, or Fees** to see interactive data cards!`,
+    text: `I've analyzed your query regarding "${userPrompt}".\n\nAs a mock assistant for CampusOS, I can query database endpoints for grades, leaves, and financial ledgers. Try typing one of the keywords like **CGPA, Exams, Leave, Attendance, Profile, Library, or Fees** to see interactive data cards!`,
   };
 };
 
@@ -260,6 +311,76 @@ interface Message {
   text: string;
   timestamp: Date;
   dataCard?: any;
+}
+
+function RichTextRenderer({ text, isUser }: { text: string; isUser: boolean }) {
+  const lines = text.split('\n');
+  const elements: React.ReactNode[] = [];
+  let currentListItems: string[] = [];
+
+  const flushList = (key: string | number) => {
+    if (currentListItems.length > 0) {
+      elements.push(
+        <ul key={`list-${key}`} className="my-2 space-y-1.5 pl-1">
+          {currentListItems.map((item, itemIdx) => {
+            const parsedItem = parseBold(item);
+            return (
+              <li key={itemIdx} className="flex items-start gap-2 text-sm leading-relaxed">
+                <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full shrink-0 text-[10px] mt-0.5 ${
+                  isUser ? 'bg-indigo-705 text-white font-bold' : 'bg-indigo-50 text-indigo-650 font-bold'
+                }`}>
+                  ✓
+                </span>
+                <span className="flex-1">{parsedItem}</span>
+              </li>
+            );
+          })}
+        </ul>
+      );
+      currentListItems = [];
+    }
+  };
+
+  const parseBold = (inputText: string): React.ReactNode[] => {
+    const parts = inputText.split('**');
+    return parts.map((part, index) => {
+      if (index % 2 === 1) {
+        return (
+          <strong
+            key={index}
+            className={`font-bold ${isUser ? 'text-white underline underline-offset-2 decoration-indigo-200' : 'text-indigo-900 bg-indigo-50/50 px-1 py-0.5 rounded'}`}
+          >
+            {part}
+          </strong>
+        );
+      }
+      return part;
+    });
+  };
+
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
+      const itemText = trimmed.replace(/^[\*\-]\s+/, '');
+      currentListItems.push(itemText);
+    } else {
+      flushList(index);
+
+      if (trimmed === '') {
+        elements.push(<div key={`spacer-${index}`} className="h-2" />);
+      } else {
+        elements.push(
+          <p key={`p-${index}`} className="text-sm leading-relaxed font-medium">
+            {parseBold(line)}
+          </p>
+        );
+      }
+    }
+  });
+
+  flushList('final');
+
+  return <div className="space-y-1">{elements}</div>;
 }
 
 export default function CamAIPage() {
@@ -513,12 +634,16 @@ export default function CamAIPage() {
                   <motion.span
                     layoutId="camaiActiveTab"
                     transition={{ type: 'spring', stiffness: 420, damping: 34 }}
-                    className="absolute inset-0 bg-indigo-50/70 border border-indigo-100 rounded-2xl shadow-sm"
+                    className={`absolute inset-0 rounded-2xl shadow-sm ${
+                      tab.id === 'ai'
+                        ? 'bg-emerald-50/70 border border-emerald-100'
+                        : 'bg-indigo-50/70 border border-indigo-100'
+                    }`}
                   />
                 )}
 
-                {/* Gradient icon chip with status + badge */}
-                <span className={`relative z-10 w-9 h-9 rounded-xl bg-gradient-to-br ${tab.gradient} flex items-center justify-center text-white shrink-0 shadow-sm`}>
+                {/* Gradient/Solid icon chip with status + badge */}
+                <span className={`relative z-10 w-9 h-9 rounded-xl ${tab.isSolid ? tab.color : `bg-gradient-to-br ${tab.gradient}`} flex items-center justify-center text-white shrink-0 shadow-sm`}>
                   <Icon className="w-4.5 h-4.5 text-white" />
                   {tab.online && (
                     <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-white" />
@@ -533,7 +658,7 @@ export default function CamAIPage() {
                 {/* Label + meta (hidden on very small screens) */}
                 <span className="relative z-10 hidden sm:flex flex-col items-start leading-tight">
                   <span className="text-xs font-bold whitespace-nowrap">{tab.label}</span>
-                  <span className={`text-[9px] font-bold font-mono uppercase tracking-wide ${isActive ? 'text-indigo-600' : 'text-slate-400'}`}>
+                  <span className={`text-[9px] font-bold font-mono uppercase tracking-wide ${isActive ? (tab.id === 'ai' ? 'text-emerald-600' : 'text-indigo-600') : 'text-slate-400'}`}>
                     {tab.meta}
                   </span>
                 </span>
@@ -554,47 +679,68 @@ export default function CamAIPage() {
             transition={{ duration: 0.18, ease: 'easeOut' }}
             className="absolute inset-0 flex flex-col"
           >
-        {/* 1. ACTIVE CHAT - AI ASSISTANT */}
-        {activeChat === 'ai' && (
-          <>
+            {/* 1. ACTIVE CHAT - AI ASSISTANT */}
+            {activeChat === 'ai' && (
+              <>
+            {/* Inline chat header */}
+            <div className="px-6 py-3.5 bg-white border-b border-slate-200 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-600 flex items-center justify-center shadow-sm">
+                  <Bot className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-xs font-extrabold text-slate-850">CamAI Campus Assistant</h2>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                    <span className="text-[10px] text-slate-500 font-bold font-mono">SYSTEM INTELLIGENCE HUB • ONLINE</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* Message Stream */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
               {aiMessages.map((msg) => (
                 <div
                   key={msg.id}
                   className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
-                  <div className={`max-w-[70%] flex gap-2.5 items-start ${msg.sender === 'user' ? 'flex-row-reverse' : ''}`}>
+                  <div className={`max-w-[70%] flex gap-3.5 items-start ${msg.sender === 'user' ? 'flex-row-reverse' : ''}`}>
                     {/* Avatar */}
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-xs font-bold ${
+                    <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-xs font-black uppercase shadow-sm border transition ${
                       msg.sender === 'user' 
-                        ? 'bg-slate-200 text-slate-700' 
-                        : 'bg-indigo-600/10 text-indigo-700'
+                        ? 'bg-slate-100 border-slate-200 text-slate-700' 
+                        : 'bg-emerald-50 border-emerald-100 text-emerald-700'
                     }`}>
-                      {msg.sender === 'user' ? 'AS' : 'AI'}
+                      {msg.sender === 'user' ? (
+                        student ? `${student.first_name[0]}${student.last_name[0]}` : 'AS'
+                      ) : (
+                        <Bot className="w-4 h-4" />
+                      )}
                     </div>
 
                     {/* Bubble */}
                     <div className="space-y-2">
-                      <div className={`p-4 rounded-3xl text-xs font-semibold leading-relaxed shadow-sm ${
+                      <div className={`p-4 rounded-2xl text-sm shadow-sm transition-all duration-200 border ${
                         msg.sender === 'user'
-                          ? 'bg-indigo-600 text-white rounded-tr-none'
-                          : 'bg-white border border-slate-200 text-slate-800 rounded-tl-none'
+                          ? 'bg-emerald-600 text-white border-emerald-500 rounded-tr-none'
+                          : 'bg-white text-slate-800 border-slate-100 rounded-tl-none'
                       }`}>
-                        {msg.text.split('\n').map((line, idx) => (
-                          <p key={idx} className={idx > 0 ? 'mt-1.5' : ''}>{line}</p>
-                        ))}
+                        <RichTextRenderer text={msg.text} isUser={msg.sender === 'user'} />
                       </div>
 
                       {/* Dynamic structured card if provided */}
                       {msg.dataCard && (
-                        <div className="bg-white border border-slate-200 rounded-3xl p-4 shadow-sm w-80 animate-fadeIn">
-                          <h4 className="text-xs font-bold text-slate-900 border-b border-slate-100 pb-2 mb-3 flex items-center gap-1.5">
-                            {msg.dataCard.type === 'grades' && <GraduationCap className="w-4 h-4 text-indigo-600" />}
+                        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-md w-80 animate-fadeIn space-y-3 mt-2">
+                          <h4 className="text-xs font-bold text-slate-900 border-b border-slate-100 pb-2 flex items-center gap-2">
+                            {msg.dataCard.type === 'grades' && <GraduationCap className="w-4 h-4 text-emerald-600" />}
                             {msg.dataCard.type === 'leaves' && <Calendar className="w-4 h-4 text-amber-600" />}
                             {msg.dataCard.type === 'fees' && <CreditCardIcon className="w-4 h-4 text-emerald-600" />}
-                            {msg.dataCard.type === 'exams' && <AwardIcon className="w-4 h-4 text-rose-600" />}
-                            {msg.dataCard.title}
+                            {msg.dataCard.type === 'exams' && <AwardIcon className="w-4 h-4 text-rose-605" />}
+                            {msg.dataCard.type === 'attendance' && <CheckCircle className="w-4 h-4 text-emerald-600" />}
+                            {msg.dataCard.type === 'profile' && <User className="w-4 h-4 text-emerald-600" />}
+                            {msg.dataCard.type === 'library' && <FileText className="w-4 h-4 text-amber-500" />}
+                            <span className="font-extrabold tracking-tight">{msg.dataCard.title}</span>
                           </h4>
 
                           {/* Render grade card */}
@@ -616,7 +762,7 @@ export default function CamAIPage() {
                                 <div key={i} className="p-2 border border-slate-100 bg-slate-50 rounded-xl flex items-center justify-between text-[10.5px]">
                                   <div>
                                     <span className="font-bold text-slate-800 block">{item.type}</span>
-                                    <span className="text-slate-500 text-[9.5px] block font-mono mt-0.5">{item.dates}</span>
+                                    <span className="text-slate-550 text-[9.5px] block font-mono mt-0.5">{item.dates}</span>
                                   </div>
                                   <span className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase ${
                                     item.status === 'Approved' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
@@ -654,6 +800,70 @@ export default function CamAIPage() {
                               ))}
                             </div>
                           )}
+
+                          {/* Render attendance sheet */}
+                          {msg.dataCard.type === 'attendance' && (
+                            <div className="space-y-2">
+                              {msg.dataCard.items.map((item: any, i: number) => (
+                                <div key={i} className="p-3 border border-slate-100 bg-slate-50/50 rounded-xl flex items-center justify-between text-[11px] hover:border-slate-200 transition">
+                                  <div>
+                                    <span className="font-bold text-slate-800 block">{item.subject}</span>
+                                    <span className="text-slate-500 text-[9.5px] block font-mono mt-0.5 font-semibold">{item.percentage} Attendance</span>
+                                  </div>
+                                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase border ${
+                                    item.status === 'Safe' ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700'
+                                  }`}>
+                                    {item.status}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Render profile card */}
+                          {msg.dataCard.type === 'profile' && (
+                            <div className="space-y-2.5">
+                              {msg.dataCard.fields.map((f: any, i: number) => (
+                                <div key={i} className="flex flex-col border-b border-slate-50 pb-1.5 text-[11px]">
+                                  <span className="text-slate-400 text-[9px] uppercase tracking-wider font-extrabold font-mono">{f.label}</span>
+                                  <span className="text-slate-800 font-bold mt-0.5">{f.value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Render library ledger */}
+                          {msg.dataCard.type === 'library' && (
+                            <div className="space-y-2">
+                              {msg.dataCard.items.map((item: any, i: number) => (
+                                <div key={i} className="p-3 border border-slate-100 bg-slate-50/50 rounded-xl flex items-center justify-between text-[11px] hover:border-slate-200 transition">
+                                  {item.book ? (
+                                    <>
+                                      <div className="min-w-0">
+                                        <span className="font-bold text-slate-800 block truncate max-w-[170px]">{item.book}</span>
+                                        <span className="text-slate-500 text-[9.5px] block font-mono mt-0.5">Due: {item.dueDate}</span>
+                                      </div>
+                                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase border shrink-0 ${
+                                        item.status === 'Issued' ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-slate-100 border-slate-200 text-slate-600'
+                                      }`}>
+                                        {item.status}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <div>
+                                        <span className="font-bold text-slate-800 block">{item.fine}</span>
+                                        <span className="text-rose-600 text-[9.5px] block font-extrabold font-mono mt-0.5">{item.amount}</span>
+                                      </div>
+                                      <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase bg-rose-50 border border-rose-100 text-rose-700 shrink-0">
+                                        {item.status}
+                                      </span>
+                                    </>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -667,11 +877,11 @@ export default function CamAIPage() {
 
               {isTyping && (
                 <div className="flex justify-start">
-                  <div className="flex gap-2.5 items-center">
-                    <div className="w-8 h-8 rounded-lg bg-indigo-600/10 text-indigo-700 flex items-center justify-center text-xs font-bold">
-                      AI
+                  <div className="flex gap-3.5 items-center">
+                    <div className="w-9 h-9 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-bold animate-pulse shadow-sm">
+                      <Bot className="w-4 h-4" />
                     </div>
-                    <div className="bg-white border border-slate-200 py-3 px-4 rounded-3xl rounded-tl-none shadow-sm flex items-center gap-1">
+                    <div className="bg-white border border-slate-100 py-3 px-4 rounded-2xl rounded-tl-none shadow-sm flex items-center gap-1">
                       <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                       <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
                       <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
@@ -684,32 +894,50 @@ export default function CamAIPage() {
             </div>
 
             {/* Quick Actions & Input bar */}
-            <div className="p-4 bg-white border-t border-slate-200 shrink-0 flex flex-col gap-3">
+            <div className="p-4 bg-white border-t border-slate-200 shrink-0 flex flex-col gap-3.5">
               {/* Context chips */}
-              <div className="flex gap-2 overflow-x-auto pb-1 scroll-smooth">
+              <div className="flex gap-2 overflow-x-auto pb-1.5 scroll-smooth custom-scrollbar">
                 <button
                   onClick={() => handleSendAiMessage('Check my CGPA and SGPA')}
-                  className="bg-slate-50 hover:bg-slate-100 border border-slate-200/80 px-3.5 py-1.5 rounded-full text-[10.5px] font-bold text-slate-600 shrink-0 transition"
+                  className="bg-white hover:bg-slate-50 border border-slate-200 shadow-sm px-4 py-1.5 rounded-full text-[10.5px] font-bold text-slate-650 shrink-0 transition flex items-center gap-1.5"
                 >
                   📊 Check Grades
                 </button>
                 <button
                   onClick={() => handleSendAiMessage('What is my leave status?')}
-                  className="bg-slate-50 hover:bg-slate-100 border border-slate-200/80 px-3.5 py-1.5 rounded-full text-[10.5px] font-bold text-slate-600 shrink-0 transition"
+                  className="bg-white hover:bg-slate-50 border border-slate-200 shadow-sm px-4 py-1.5 rounded-full text-[10.5px] font-bold text-slate-650 shrink-0 transition flex items-center gap-1.5"
                 >
                   📅 Leave Status
                 </button>
                 <button
                   onClick={() => handleSendAiMessage('Do I have outstanding fees?')}
-                  className="bg-slate-50 hover:bg-slate-100 border border-slate-200/80 px-3.5 py-1.5 rounded-full text-[10.5px] font-bold text-slate-600 shrink-0 transition"
+                  className="bg-white hover:bg-slate-50 border border-slate-200 shadow-sm px-4 py-1.5 rounded-full text-[10.5px] font-bold text-slate-650 shrink-0 transition flex items-center gap-1.5"
                 >
                   💳 Check Fees
                 </button>
                 <button
                   onClick={() => handleSendAiMessage('Show my upcoming exam dates')}
-                  className="bg-slate-50 hover:bg-slate-100 border border-slate-200/80 px-3.5 py-1.5 rounded-full text-[10.5px] font-bold text-slate-600 shrink-0 transition"
+                  className="bg-white hover:bg-slate-50 border border-slate-200 shadow-sm px-4 py-1.5 rounded-full text-[10.5px] font-bold text-slate-650 shrink-0 transition flex items-center gap-1.5"
                 >
                   📝 Exam Timetable
+                </button>
+                <button
+                  onClick={() => handleSendAiMessage('Check my attendance status')}
+                  className="bg-white hover:bg-slate-50 border border-slate-200 shadow-sm px-4 py-1.5 rounded-full text-[10.5px] font-bold text-slate-650 shrink-0 transition flex items-center gap-1.5"
+                >
+                  📈 Attendance
+                </button>
+                <button
+                  onClick={() => handleSendAiMessage('Show my student details')}
+                  className="bg-white hover:bg-slate-50 border border-slate-200 shadow-sm px-4 py-1.5 rounded-full text-[10.5px] font-bold text-slate-650 shrink-0 transition flex items-center gap-1.5"
+                >
+                  👤 Profile Details
+                </button>
+                <button
+                  onClick={() => handleSendAiMessage('Show library issued books')}
+                  className="bg-white hover:bg-slate-50 border border-slate-200 shadow-sm px-4 py-1.5 rounded-full text-[10.5px] font-bold text-slate-650 shrink-0 transition flex items-center gap-1.5"
+                >
+                  📚 Library Account
                 </button>
               </div>
 
@@ -723,12 +951,12 @@ export default function CamAIPage() {
                   value={aiInput}
                   onChange={(e) => setAiInput(e.target.value)}
                   placeholder="Ask CamAI campus assistant..."
-                  className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 text-xs focus:outline-none focus:border-indigo-500 font-semibold text-slate-700"
+                  className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 text-xs focus:outline-none focus:border-emerald-500 font-semibold text-slate-705"
                 />
                 <button
                   type="submit"
                   disabled={!aiInput.trim()}
-                  className="w-10 h-10 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-50 text-white rounded-2xl flex items-center justify-center transition shadow-md shadow-indigo-600/10"
+                  className="w-10 h-10 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50 text-white rounded-2xl flex items-center justify-center transition shadow-md shadow-emerald-600/10"
                 >
                   <Send className="w-4.5 h-4.5" />
                 </button>
