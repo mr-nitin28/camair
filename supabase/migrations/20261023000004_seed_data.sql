@@ -25,6 +25,69 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================================
+-- 1.5 AUTH USERS (If auth schema exists)
+-- ============================================================================
+DO $$ 
+DECLARE
+    v_pwd TEXT;
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'users') THEN
+        BEGIN
+            EXECUTE 'SELECT crypt(''password123'', gen_salt(''bf''))' INTO v_pwd;
+        EXCEPTION WHEN OTHERS THEN
+            BEGIN
+                EXECUTE 'SELECT extensions.crypt(''password123'', extensions.gen_salt(''bf''))' INTO v_pwd;
+            EXCEPTION WHEN OTHERS THEN
+                v_pwd := '$2a$10$4.oP26xX6Z4h/GqK6hJqSuKqTf56K4B23t2/E4V3fG4y4H4s4E4W.';
+            END;
+        END;
+
+        INSERT INTO auth.users (
+            id,
+            instance_id,
+            aud,
+            role,
+            email,
+            encrypted_password,
+            email_confirmed_at,
+            raw_app_meta_data,
+            raw_user_meta_data,
+            created_at,
+            updated_at
+        ) VALUES 
+        ('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'admin@campusos.dev', v_pwd, NOW(), '{"provider":"email","providers":["email"]}', '{}', NOW(), NOW()),
+        ('00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'instadmin@mit.edu', v_pwd, NOW(), '{"provider":"email","providers":["email"]}', '{}', NOW(), NOW()),
+        ('00000000-0000-0000-0000-000000000012', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'examadmin@mit.edu', v_pwd, NOW(), '{"provider":"email","providers":["email"]}', '{}', NOW(), NOW()),
+        ('00000000-0000-0000-0000-000000000013', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'financeadmin@mit.edu', v_pwd, NOW(), '{"provider":"email","providers":["email"]}', '{}', NOW(), NOW()),
+        ('00000000-0000-0000-0000-000000000014', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'academicadmin@mit.edu', v_pwd, NOW(), '{"provider":"email","providers":["email"]}', '{}', NOW(), NOW()),
+        ('00000000-0000-0000-0000-000000000015', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'deptadmin@mit.edu', v_pwd, NOW(), '{"provider":"email","providers":["email"]}', '{}', NOW(), NOW()),
+        ('00000000-0000-0000-0000-000000000020', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'faculty@campusos.dev', v_pwd, NOW(), '{"provider":"email","providers":["email"]}', '{}', NOW(), NOW()),
+        ('00000000-0000-0000-0000-000000000021', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'faculty2@mit.edu', v_pwd, NOW(), '{"provider":"email","providers":["email"]}', '{}', NOW(), NOW()),
+        ('00000000-0000-0000-0000-000000000030', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'student@campusos.dev', v_pwd, NOW(), '{"provider":"email","providers":["email"]}', '{}', NOW(), NOW()),
+        ('00000000-0000-0000-0000-000000000031', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'student2@mit.edu', v_pwd, NOW(), '{"provider":"email","providers":["email"]}', '{}', NOW(), NOW()),
+        ('00000000-0000-0000-0000-000000000040', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'student@psu.edu', v_pwd, NOW(), '{"provider":"email","providers":["email"]}', '{}', NOW(), NOW())
+        ON CONFLICT (id) DO NOTHING;
+
+        IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'identities') THEN
+            INSERT INTO auth.identities (
+                id,
+                user_id,
+                identity_data,
+                provider,
+                provider_id,
+                last_sign_in_at,
+                created_at,
+                updated_at
+            ) VALUES 
+            ('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000010', json_build_object('sub', '00000000-0000-0000-0000-000000000010', 'email', 'admin@campusos.dev'), 'email', '00000000-0000-0000-0000-000000000010', NOW(), NOW(), NOW()),
+            ('00000000-0000-0000-0000-000000000020', '00000000-0000-0000-0000-000000000020', json_build_object('sub', '00000000-0000-0000-0000-000000000020', 'email', 'faculty@campusos.dev'), 'email', '00000000-0000-0000-0000-000000000020', NOW(), NOW(), NOW()),
+            ('00000000-0000-0000-0000-000000000030', '00000000-0000-0000-0000-000000000030', json_build_object('sub', '00000000-0000-0000-0000-000000000030', 'email', 'student@campusos.dev'), 'email', '00000000-0000-0000-0000-000000000030', NOW(), NOW(), NOW())
+            ON CONFLICT (provider, provider_id) DO NOTHING;
+        END IF;
+    END IF;
+END $$;
+
+-- ============================================================================
 -- 2. USER PROFILES
 -- ============================================================================
 INSERT INTO public.user_profiles (id, institution_id, email, first_name, last_name, phone, is_active)

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@/lib/supabase/client';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GraduationCap, Mail, Lock, ArrowRight, AlertCircle, Loader2, User } from 'lucide-react';
 
@@ -35,7 +35,7 @@ export default function LoginPage() {
     }
   }, [router]);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
       setError('Please enter both email and password.');
@@ -44,40 +44,120 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
 
-    // Instant routing for demo credentials
-    if (email === 'student@campusos.dev' && password === 'password123') {
-      localStorage.setItem('mock_user_role', 'student');
-      router.push('/dashboard');
-    } else if (email === 'faculty@campusos.dev' && password === 'password123') {
-      localStorage.setItem('mock_user_role', 'faculty');
-      router.push('/faculty');
-    } else if (email === 'admin@campusos.dev' && password === 'password123') {
-      localStorage.setItem('mock_user_role', 'admin');
-      router.push('/admin');
-    } else {
-      setError('Invalid credentials. Use the demo buttons below.');
-      setLoading(false);
+    try {
+      const supabase = createClient();
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (!authError && data?.user) {
+        // Fetch role from user_roles
+        const { data: roleRow } = await supabase
+          .from('user_roles')
+          .select('role')
+          .eq('user_id', data.user.id)
+          .maybeSingle();
+
+        const role = (roleRow as { role?: string } | null)?.role;
+        if (role === 'Faculty') {
+          localStorage.setItem('mock_user_role', 'faculty');
+          router.push('/faculty');
+          return;
+        } else if (role === 'Student') {
+          localStorage.setItem('mock_user_role', 'student');
+          router.push('/dashboard');
+          return;
+        } else {
+          localStorage.setItem('mock_user_role', 'admin');
+          router.push('/admin');
+          return;
+        }
+      }
+
+      if (authError) {
+        // Fallback for offline demo credentials
+        if (email === 'student@campusos.dev' && password === 'password123') {
+          localStorage.setItem('mock_user_role', 'student');
+          router.push('/dashboard');
+          return;
+        } else if (email === 'faculty@campusos.dev' && password === 'password123') {
+          localStorage.setItem('mock_user_role', 'faculty');
+          router.push('/faculty');
+          return;
+        } else if (email === 'admin@campusos.dev' && password === 'password123') {
+          localStorage.setItem('mock_user_role', 'admin');
+          router.push('/admin');
+          return;
+        }
+
+        setError(authError.message || 'Invalid email or password.');
+        setLoading(false);
+        return;
+      }
+    } catch (err: any) {
+      // Offline fallback
+      if (email === 'student@campusos.dev' && password === 'password123') {
+        localStorage.setItem('mock_user_role', 'student');
+        router.push('/dashboard');
+      } else if (email === 'faculty@campusos.dev' && password === 'password123') {
+        localStorage.setItem('mock_user_role', 'faculty');
+        router.push('/faculty');
+      } else if (email === 'admin@campusos.dev' && password === 'password123') {
+        localStorage.setItem('mock_user_role', 'admin');
+        router.push('/admin');
+      } else {
+        setError(err.message || 'Network error occurred during login.');
+        setLoading(false);
+      }
     }
   };
 
-  const handleDemoLogin = () => {
+  const handleDemoLogin = async () => {
     setError(null);
     setDemoLoading(true);
     localStorage.setItem('mock_user_role', 'student');
+    try {
+      const supabase = createClient();
+      await supabase.auth.signInWithPassword({
+        email: 'student@campusos.dev',
+        password: 'password123',
+      });
+    } catch {
+      // Ignored for demo offline
+    }
     router.push('/dashboard');
   };
 
-  const handleDemoFacultyLogin = () => {
+  const handleDemoFacultyLogin = async () => {
     setError(null);
     setDemoFacultyLoading(true);
     localStorage.setItem('mock_user_role', 'faculty');
+    try {
+      const supabase = createClient();
+      await supabase.auth.signInWithPassword({
+        email: 'faculty@campusos.dev',
+        password: 'password123',
+      });
+    } catch {
+      // Ignored for demo offline
+    }
     router.push('/faculty');
   };
 
-  const handleDemoAdminLogin = () => {
+  const handleDemoAdminLogin = async () => {
     setError(null);
     setDemoAdminLoading(true);
     localStorage.setItem('mock_user_role', 'admin');
+    try {
+      const supabase = createClient();
+      await supabase.auth.signInWithPassword({
+        email: 'admin@campusos.dev',
+        password: 'password123',
+      });
+    } catch {
+      // Ignored for demo offline
+    }
     router.push('/admin');
   };
 
