@@ -1,481 +1,694 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
-import { useAppStore } from '@/lib/store';
-import { motion, AnimatePresence } from 'framer-motion';
+import {
+  FacultyService,
+  type AssessmentRecordItem,
+  type MarksDiffItem,
+  type CsvImportResult,
+} from '@/lib/services/faculty-service';
+import { calculateGradeFromMarks } from '@/lib/calculations/academic';
+import { Dialog } from '@/components/ui/dialog';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { SkeletonList, SkeletonCard } from '@/components/ui/skeleton';
 import {
   Award,
   ArrowLeft,
   CheckCircle,
   AlertTriangle,
   Save,
-  Loader2,
+  Search,
   FileSpreadsheet,
   Download,
+  Upload,
+  Sparkles,
+  RotateCcw,
+  Check,
+  ChevronRight,
+  Send,
+  Eye,
+  Clock,
 } from 'lucide-react';
 import Link from 'next/link';
 
-interface Student {
-  id: string;
-  student_id: string;
-  first_name: string;
-  last_name: string;
-  semester_id: string;
-}
-
-interface ResultRecord {
-  id?: string;
-  student_id: string;
-  subject_id: string;
-  semester_id: string;
-  internal_marks: number;
-  assignment_marks: number;
-  practical_marks: number;
-  exam_marks: number;
-  grade: string;
-  grade_points: number;
-}
-
-export default function ExamsGradesPage() {
-  const { faculty } = useAppStore();
+function FacultyExamsGradesContent() {
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
+  const queryAssessmentId = searchParams.get('assessmentId') || undefined;
 
-  const [selectedSubjectId, setSelectedSubjectId] = useState('');
-  const [gradesSheet, setGradesSheet] = useState<Record<string, Omit<ResultRecord, 'subject_id' | 'semester_id'>>>({});
-  
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  // Fetch subjects taught by faculty
-  const { data: subjects } = useQuery({
-    queryKey: ['faculty-subjects-exams', faculty?.id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('faculty_subjects')
-        .select('*, subjects(*)');
-      if (error) throw error;
-      return data?.map((fs: any) => fs.subjects) || [];
-    },
-    enabled: !!faculty,
+  // 1. Fetch Assessment Data
+  const {
+    data: assessment,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ['faculty-assessment-grid', queryAssessmentId],
+    queryFn: () => FacultyService.getMarksGrid(queryAssessmentId),
   });
 
-  // Set default subject
+  // Local editable marks state: studentId -> marks
+  const [marksState, setMarksState] = useState<Record<string, number | null>>({});
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCellStudentId, setSelectedCellStudentId] = useState<string | null>(null);
+
+  // Modals & Diff view
+  const [diffModalOpen, setDiffModalOpen] = useState(false);
+  const [pasteModalOpen, setPasteModalOpen] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [csvResult, setCsvResult] = useState<CsvImportResult | null>(null);
+  const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Initialize editable state
   useEffect(() => {
-    if (subjects && subjects.length > 0 && !selectedSubjectId) {
-      setSelectedSubjectId(subjects[0].id);
-    }
-  }, [subjects, selectedSubjectId]);
-
-  // Fetch students (for Semester 6/B.Tech)
-  const { data: students, isLoading: loadingStudents } = useQuery({
-    queryKey: ['students-exams-list'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('students')
-        .select('*')
-        .order('student_id', { ascending: true });
-      if (error) throw error;
-      return data as Student[];
-    },
-  });
-
-  // Fetch existing results for selected subject
-  const { data: existingResults, isLoading: loadingResults } = useQuery({
-    queryKey: ['existing-results-list', selectedSubjectId],
-    queryFn: async () => {
-      if (!selectedSubjectId) return [];
-      const { data, error } = await supabase
-        .from('results')
-        .select('*')
-        .eq('subject_id', selectedSubjectId);
-      if (error) throw error;
-      return data as ResultRecord[];
-    },
-    enabled: !!selectedSubjectId,
-  });
-
-  // Sync state
-  useEffect(() => {
-    if (students && selectedSubjectId) {
-      const sheet: Record<string, Omit<ResultRecord, 'subject_id' | 'semester_id'>> = {};
-      
-      students.forEach((s) => {
-        // Find existing result
-        const res = existingResults?.find((r) => r.student_id === s.id);
-        if (res) {
-          sheet[s.id] = {
-            id: res.id,
-            student_id: s.id,
-            internal_marks: Number(res.internal_marks) || 0,
-            assignment_marks: Number(res.assignment_marks) || 0,
-            practical_marks: Number(res.practical_marks) || 0,
-            exam_marks: Number(res.exam_marks) || 0,
-            grade: res.grade || 'IP',
-            grade_points: res.grade_points || 0,
-          };
-        } else {
-          sheet[s.id] = {
-            student_id: s.id,
-            internal_marks: 0,
-            assignment_marks: 0,
-            practical_marks: 0,
-            exam_marks: 0,
-            grade: 'IP',
-            grade_points: 0,
-          };
-        }
+    if (assessment) {
+      const initialMap: Record<string, number | null> = {};
+      assessment.records.forEach((r: AssessmentRecordItem) => {
+        initialMap[r.studentId] = r.marksObtained;
       });
-      setGradesSheet(sheet);
+      setMarksState(initialMap);
     }
-  }, [students, existingResults, selectedSubjectId]);
+  }, [assessment]);
 
-  // Grade calculator utility
-  const calculateGradeAndPoints = (
-    internals: number,
-    assignments: number,
-    practicals: number,
-    exams: number
-  ) => {
-    // Standard total weight = internal (30) + assignment (20) + practical (50) + exam (100) = 200 max.
-    const total = Number(internals) + Number(assignments) + Number(practicals) + Number(exams);
-    const percentage = (total / 200) * 100;
-
-    let grade = 'F';
-    let points = 0;
-
-    if (percentage >= 90) {
-      grade = 'O';
-      points = 10;
-    } else if (percentage >= 80) {
-      grade = 'A+';
-      points = 9;
-    } else if (percentage >= 70) {
-      grade = 'A';
-      points = 8;
-    } else if (percentage >= 60) {
-      grade = 'B+';
-      points = 7;
-    } else if (percentage >= 50) {
-      grade = 'B';
-      points = 6;
-    } else if (percentage >= 40) {
-      grade = 'C';
-      points = 5;
-    } else {
-      grade = 'F';
-      points = 0;
+  // Handle cell marks change with boundary checking
+  const handleCellChange = (studentId: string, value: string) => {
+    if (!assessment) return;
+    if (value.trim() === '') {
+      setMarksState((prev) => ({ ...prev, [studentId]: null }));
+      return;
     }
-
-    return { grade, points, total };
+    const num = parseFloat(value);
+    if (!isNaN(num)) {
+      setMarksState((prev) => ({ ...prev, [studentId]: num }));
+    }
   };
 
-  const handleMarkChange = (
-    studentId: string,
-    field: 'internal_marks' | 'assignment_marks' | 'practical_marks' | 'exam_marks',
-    val: number
-  ) => {
-    // Constrain max marks bounds
-    let max = 100;
-    if (field === 'internal_marks') max = 30;
-    if (field === 'assignment_marks') max = 20;
-    if (field === 'practical_marks') max = 50;
-
-    const numericVal = Math.min(max, Math.max(0, val));
-
-    setGradesSheet((prev) => {
-      const record = prev[studentId];
-      const nextRecord = {
-        ...record,
-        [field]: numericVal,
-      };
-
-      const { grade, points } = calculateGradeAndPoints(
-        field === 'internal_marks' ? numericVal : record.internal_marks,
-        field === 'assignment_marks' ? numericVal : record.assignment_marks,
-        field === 'practical_marks' ? numericVal : record.practical_marks,
-        field === 'exam_marks' ? numericVal : record.exam_marks
+  // Filtered assessment records
+  const filteredRecords = useMemo(() => {
+    if (!assessment) return [];
+    return assessment.records.filter((r: AssessmentRecordItem) => {
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase().trim();
+      return (
+        r.studentName.toLowerCase().includes(q) ||
+        r.rollNo.toLowerCase().includes(q) ||
+        r.enrollmentNo.toLowerCase().includes(q)
       );
+    });
+  }, [assessment, searchQuery]);
 
+  // Generate Diff View Comparing Initial Assessment Records with Local State
+  const diffItems: MarksDiffItem[] = useMemo(() => {
+    if (!assessment) return [];
+    const proposed = Object.entries(marksState).map(([studentId, marks]) => {
+      const rec = assessment.records.find((r: AssessmentRecordItem) => r.studentId === studentId);
       return {
-        ...prev,
-        [studentId]: {
-          ...nextRecord,
-          grade,
-          grade_points: points,
-        },
+        studentId,
+        rollNo: rec ? rec.rollNo : '',
+        marks: marks || 0,
       };
     });
+    return FacultyService.calculateMarksDiff(assessment.records, proposed, assessment.maxMarks);
+  }, [assessment, marksState]);
+
+  const modifiedCount = useMemo(() => {
+    return diffItems.filter((d) => d.status === 'modified').length;
+  }, [diffItems]);
+
+  // Handle CSV Paste Import
+  const handleParseCsv = () => {
+    if (!assessment) return;
+    const result = FacultyService.parseMarksCsv(pasteText, assessment.maxMarks);
+    setCsvResult(result);
   };
 
-  // Batch Save Mutation
-  const saveGradesMutation = useMutation({
-    mutationFn: async () => {
-      if (!selectedSubjectId || !students) return;
+  // Apply parsed CSV to marksState
+  const handleApplyCsv = () => {
+    if (!csvResult || !assessment) return;
+    const next = { ...marksState };
+    const rollMap = new Map<string, string>();
+    assessment.records.forEach((r: AssessmentRecordItem) => rollMap.set(r.rollNo.toUpperCase(), r.studentId));
 
-      const records = Object.values(gradesSheet).map((row) => {
-        const student = students.find((s) => s.id === row.student_id);
-        return {
-          id: row.id || undefined, // Keep existing UUID if updates, otherwise omit for generate
-          student_id: row.student_id,
-          subject_id: selectedSubjectId,
-          semester_id: student?.semester_id || '98fb4928-8d4a-464b-b0b3-57bb735db9d3', // Default sem fallback
-          internal_marks: row.internal_marks,
-          assignment_marks: row.assignment_marks,
-          practical_marks: row.practical_marks,
-          exam_marks: row.exam_marks,
-          grade: row.grade,
-          grade_points: row.grade_points,
-        };
-      });
-
-      const { error } = await supabase.from('results').upsert(records, { onConflict: 'student_id,subject_id' });
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['existing-results-list'] });
-      setSuccessMsg('Grades and marks records published successfully.');
-      setTimeout(() => setSuccessMsg(null), 3000);
-      setErrorMsg(null);
-    },
-    onError: (err: any) => {
-      setErrorMsg(err?.message || 'Failed to upsert marks logs.');
-    },
-  });
-
-  const handleExportCSV = () => {
-    if (!students || !gradesSheet) return;
-    const currentSubjectName = subjects?.find((s) => s.id === selectedSubjectId)?.name || 'Subject';
-    
-    let csvContent = 'data:text/csv;charset=utf-8,';
-    csvContent += 'Student ID,First Name,Last Name,Internals (30),Assignments (20),Practicals (50),End Sem (100),Total (200),Grade,Grade Point\n';
-
-    students.forEach((s) => {
-      const g = gradesSheet[s.id];
-      if (g) {
-        const total = g.internal_marks + g.assignment_marks + g.practical_marks + g.exam_marks;
-        csvContent += `${s.student_id},${s.first_name},${s.last_name},${g.internal_marks},${g.assignment_marks},${g.practical_marks},${g.exam_marks},${total},${g.grade},${g.grade_points}\n`;
+    csvResult.records.forEach((rec) => {
+      const studentId = rollMap.get(rec.rollNo.toUpperCase());
+      if (studentId) {
+        next[studentId] = rec.marks;
       }
     });
 
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `${currentSubjectName.replace(/\s+/g, '_')}_grades.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    setMarksState(next);
+    setPasteModalOpen(false);
+    setPasteText('');
+    setCsvResult(null);
+    setSuccessToast(`Imported ${csvResult.records.length} marks entries from CSV.`);
+    setTimeout(() => setSuccessToast(null), 4000);
   };
 
-  const currentSubject = subjects?.find((s) => s.id === selectedSubjectId);
+  // Mutation for saving draft or submitting for Exam Admin review
+  const saveMutation = useMutation({
+    mutationFn: async (targetStatus: 'draft' | 'submitted') => {
+      if (!assessment) return;
+      const records = Object.entries(marksState).map(([studentId, marks]) => ({
+        studentId,
+        marks: marks === null ? 0 : marks,
+      }));
+
+      return await FacultyService.updateAssessmentMarks({
+        assessmentId: assessment.id,
+        records,
+        status: targetStatus,
+      });
+    },
+    onSuccess: (res, targetStatus) => {
+      setDiffModalOpen(false);
+      setActionError(null);
+      setSuccessToast(
+        targetStatus === 'submitted'
+          ? 'Marks successfully submitted to Examination Admin for verification.'
+          : 'Draft marks saved successfully.'
+      );
+      queryClient.invalidateQueries({ queryKey: ['faculty-assessment-grid'] });
+      queryClient.invalidateQueries({ queryKey: ['faculty-console-summary'] });
+      setTimeout(() => setSuccessToast(null), 5000);
+    },
+    onError: (err: any) => {
+      setActionError(err?.message || 'Failed to update marks.');
+    },
+  });
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <SkeletonCard height={80} />
+        <SkeletonCard height={60} />
+        <SkeletonList count={8} />
+      </div>
+    );
+  }
+
+  if (isError || !assessment) {
+    return (
+      <ErrorState
+        title="Assessment Not Found"
+        message={error instanceof Error ? error.message : 'Unable to load marks entry grid.'}
+        onRetry={() => refetch()}
+      />
+    );
+  }
+
+  const isPublished = assessment.status === 'published';
+  const isSubmitted = assessment.status === 'submitted';
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      {/* Toast Notification */}
+      {successToast && (
+        <div className="p-4 rounded-2xl bg-emerald-500 text-white font-bold text-sm shadow-lg flex items-center justify-between animate-fadeIn">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle className="w-5 h-5 text-white" />
+            <span>{successToast}</span>
+          </div>
+          <button
+            onClick={() => setSuccessToast(null)}
+            className="text-xs px-2.5 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-white"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* 1. HEADER & ASSESSMENT METADATA */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 rounded-3xl bg-card border border-border shadow-xs">
         <div>
-          <Link
-            href="/faculty"
-            className="text-xs text-slate-500 hover:text-blue-600 font-semibold flex items-center gap-1 mb-2"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" /> Back to Workspace
-          </Link>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Exams & Grade Registry</h2>
-          <p className="text-slate-500 text-xs mt-1">
-            Input student scores for internal assessments, assignments, practical tasks, and end-semester examinations.
-          </p>
-        </div>
-
-        <div className="flex gap-2">
-          <button
-            onClick={handleExportCSV}
-            className="bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-semibold text-xs py-2 px-3.5 rounded-xl shadow-sm flex items-center gap-1.5 transition"
-            title="Export csv file"
-          >
-            <Download className="w-4 h-4 text-slate-400" /> Export CSV
-          </button>
-          <button
-            onClick={() => saveGradesMutation.mutate()}
-            disabled={saveGradesMutation.isPending}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs py-2 px-4 rounded-xl shadow-md shadow-blue-600/10 flex items-center gap-1.5 transition"
-          >
-            {saveGradesMutation.isPending ? (
-              <Loader2 className="w-4 h-4 animate-spin text-white" />
-            ) : (
-              <Save className="w-4 h-4 text-white" />
-            )}
-            Publish Grades
-          </button>
-        </div>
-      </div>
-
-      {/* Select Subject Filter card */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex items-center justify-between gap-6 flex-wrap">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
-            <Award className="w-5 h-5 text-blue-600" />
+          <div className="flex items-center gap-2 text-xs text-muted-foreground font-semibold mb-1">
+            <Link href="/faculty" className="hover:text-primary flex items-center gap-1">
+              <ArrowLeft className="w-3.5 h-3.5" /> Faculty Console
+            </Link>
+            <span>•</span>
+            <span>{assessment.subjectCode} ({assessment.subjectName})</span>
+            <span>•</span>
+            <span>Max Marks: {assessment.maxMarks}</span>
+            <span>•</span>
+            <span>Weightage: {assessment.weightage}%</span>
           </div>
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Active Course Unit</span>
-            <select
-              value={selectedSubjectId}
-              onChange={(e) => setSelectedSubjectId(e.target.value)}
-              className="mt-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-bold py-1.5 px-3 focus:outline-none focus:border-blue-500 transition"
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-xl md:text-2xl font-black text-foreground tracking-tight">
+              {assessment.name}
+            </h1>
+            <StatusBadge
+              status={
+                assessment.status === 'published'
+                  ? 'active'
+                  : assessment.status === 'submitted'
+                  ? 'pending'
+                  : 'draft'
+              }
+              label={
+                assessment.status === 'published'
+                  ? 'PUBLISHED (LOCKED)'
+                  : assessment.status === 'submitted'
+                  ? 'SUBMITTED FOR REVIEW'
+                  : 'DRAFT MODE'
+              }
+            />
+          </div>
+
+          {/* 4-Stage Status Chips (draft -> submitted -> reviewed -> published) */}
+          <div className="flex flex-wrap items-center gap-1.5 mt-2 p-1 bg-muted/60 rounded-2xl border border-border/60 text-xs">
+            {(['draft', 'submitted', 'reviewed', 'published'] as const).map((stage, idx, arr) => {
+              const stages = ['draft', 'submitted', 'reviewed', 'published'];
+              const currentIdx = stages.indexOf(assessment.status);
+              const stageIdx = stages.indexOf(stage);
+              const isPast = stageIdx < currentIdx;
+              const isCurrent = stageIdx === currentIdx;
+
+              return (
+                <React.Fragment key={stage}>
+                  <div
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl font-bold uppercase text-[10px] tracking-wider transition-all ${
+                      isCurrent
+                        ? 'bg-primary text-primary-foreground shadow-xs'
+                        : isPast
+                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold'
+                        : 'text-muted-foreground/70'
+                    }`}
+                  >
+                    {isPast ? (
+                      <Check className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                    ) : (
+                      <span className="w-3.5 h-3.5 rounded-full border border-current flex items-center justify-center text-[9px]">
+                        {idx + 1}
+                      </span>
+                    )}
+                    <span>{stage}</span>
+                  </div>
+                  {idx < arr.length - 1 && (
+                    <ChevronRight className="w-3 h-3 text-muted-foreground/40 shrink-0" />
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          {!isPublished && (
+            <button
+              onClick={() => setPasteModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-border/80 hover:bg-muted text-xs font-bold text-foreground transition-colors"
             >
-              {subjects?.map((sub) => (
-                <option key={sub.id} value={sub.id}>
-                  {sub.name} ({sub.code})
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <span>Paste from Excel / CSV</span>
+            </button>
+          )}
 
-        {currentSubject && (
-          <div className="text-right">
-            <span className="text-[10px] font-bold text-slate-400 block">Grading Weight Scales</span>
-            <span className="text-[11px] font-bold text-slate-700 mt-1 block">
-              Internals (30m) • Assignments (20m) • Practicals (50m) • End Sem (100m)
-            </span>
-          </div>
-        )}
+          {!isPublished && (
+            <button
+              onClick={() => setDiffModalOpen(true)}
+              disabled={modifiedCount === 0}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                modifiedCount > 0
+                  ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/30'
+                  : 'border border-border/70 text-muted-foreground opacity-60 cursor-not-allowed'
+              }`}
+            >
+              <Eye className="w-4 h-4" />
+              <span>View Diff ({modifiedCount} modified)</span>
+            </button>
+          )}
+
+          {!isPublished && (
+            <button
+              onClick={() => saveMutation.mutate('submitted')}
+              disabled={saveMutation.isPending}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-xs shadow-md hover:bg-primary/90 transition-all hover:scale-[1.02] active:scale-[0.98]"
+            >
+              <Send className="w-4 h-4" />
+              <span>Submit to Exam Cell</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Error & Success Messages */}
-      <AnimatePresence>
-        {successMsg && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs flex items-center gap-2"
-          >
-            <CheckCircle className="w-4.5 h-4.5 text-emerald-600 shrink-0" />
-            <span className="font-semibold">{successMsg}</span>
-          </motion.div>
-        )}
-        {errorMsg && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-800 text-xs flex items-center gap-2"
-          >
-            <AlertTriangle className="w-4.5 h-4.5 text-red-500 shrink-0" />
-            <span className="font-semibold">{errorMsg}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Grades Table */}
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-        {loadingStudents || loadingResults ? (
-          <div className="p-12 text-center text-slate-400">
-            <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-            <p className="text-xs font-semibold">Syncing student roster logs...</p>
+      {/* 2. SPREADSHEET TOOLBAR & STATUS WARNING */}
+      <div className="p-4 rounded-2xl bg-muted/40 border border-border/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-3">
+          <div className="relative w-64">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Filter by roll no or name..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-card border border-border/70 text-xs text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/40"
+            />
           </div>
-        ) : students && students.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 uppercase font-bold text-[9px] tracking-wider">
-                  <th className="py-3.5 px-6">Student details</th>
-                  <th className="py-3.5 px-4 text-center">Internals (Max 30)</th>
-                  <th className="py-3.5 px-4 text-center">Assignments (Max 20)</th>
-                  <th className="py-3.5 px-4 text-center">Practicals (Max 50)</th>
-                  <th className="py-3.5 px-4 text-center">End Sem (Max 100)</th>
-                  <th className="py-3.5 px-4 text-center">Total (Max 200)</th>
-                  <th className="py-3.5 px-4 text-center">Auto Grade</th>
-                  <th className="py-3.5 px-6 text-center">Points</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                {students.map((student) => {
-                  const record = gradesSheet[student.id] || {
-                    internal_marks: 0,
-                    assignment_marks: 0,
-                    practical_marks: 0,
-                    exam_marks: 0,
-                    grade: 'IP',
-                    grade_points: 0,
-                  };
+          <span className="text-muted-foreground hidden sm:inline">
+            Showing {filteredRecords.length} of {assessment.records.length} students
+          </span>
+        </div>
 
-                  const totalScore =
-                    Number(record.internal_marks) +
-                    Number(record.assignment_marks) +
-                    Number(record.practical_marks) +
-                    Number(record.exam_marks);
+        <div className="flex items-center gap-2">
+          {isPublished ? (
+            <span className="text-emerald-700 dark:text-emerald-400 font-bold flex items-center gap-1">
+              <CheckCircle className="w-4 h-4" /> Examination Admin published results. Grades are authoritative.
+            </span>
+          ) : isSubmitted ? (
+            <span className="text-amber-700 dark:text-amber-400 font-bold flex items-center gap-1">
+              <Clock className="w-4 h-4" /> Under review by Examination Cell. Editing will update proposed marks.
+            </span>
+          ) : (
+            <span className="text-muted-foreground flex items-center gap-1">
+              <Sparkles className="w-3.5 h-3.5 text-primary" /> UGC 10-Point Scale Auto-Calculated Inline
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* 3. SPREADSHEET MARKS ENTRY GRID */}
+      <div className="rounded-3xl bg-card border border-border shadow-xs overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="bg-muted/70 border-b border-border text-muted-foreground uppercase text-[10px] font-bold tracking-wider">
+                <th className="py-3 px-4 w-12">#</th>
+                <th className="py-3 px-4 w-32">Roll No</th>
+                <th className="py-3 px-4 min-w-[180px]">Student Name</th>
+                <th className="py-3 px-4 w-40">
+                  Marks Obtained <span className="font-normal">(Max: {assessment.maxMarks})</span>
+                </th>
+                <th className="py-3 px-4 w-28 text-center">Percentage</th>
+                <th className="py-3 px-4 w-24 text-center">Grade</th>
+                <th className="py-3 px-4 w-24 text-center">Grade Points</th>
+                <th className="py-3 px-4 w-32 text-center">Change State</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/40">
+              {filteredRecords.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="py-8 text-center text-muted-foreground">
+                    No students match the search filter.
+                  </td>
+                </tr>
+              ) : (
+                filteredRecords.map((r: AssessmentRecordItem, idx: number) => {
+                  const currentMarks = marksState[r.studentId] !== undefined ? marksState[r.studentId] : r.marksObtained;
+                  const originalMarks = r.marksObtained;
+                  const isModified = currentMarks !== originalMarks;
+                  const isValid =
+                    currentMarks === null || (currentMarks >= 0 && currentMarks <= assessment.maxMarks);
+
+                  const gradeInfo =
+                    currentMarks !== null
+                      ? calculateGradeFromMarks(currentMarks, assessment.maxMarks)
+                      : { percentage: 0, grade: '—', gradePoints: 0, description: 'Pending' };
 
                   return (
-                    <tr key={student.id} className="hover:bg-slate-50/50 transition">
-                      <td className="py-3.5 px-6">
-                        <div className="font-bold text-slate-900">
-                          {student.first_name} {student.last_name}
-                        </div>
-                        <div className="text-[10px] text-slate-400 font-mono mt-0.5">{student.student_id}</div>
+                    <tr
+                      key={r.studentId}
+                      className={`hover:bg-muted/30 transition-colors ${
+                        isModified ? 'bg-amber-500/5' : ''
+                      }`}
+                    >
+                      <td className="py-3 px-4 font-mono text-muted-foreground/80">
+                        {(idx + 1).toString().padStart(2, '0')}
                       </td>
-                      <td className="py-3.5 px-4 text-center">
-                        <input
-                          type="number"
-                          value={record.internal_marks}
-                          onChange={(e) =>
-                            handleMarkChange(student.id, 'internal_marks', parseFloat(e.target.value) || 0)
-                          }
-                          className="w-16 bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-center text-xs focus:outline-none focus:border-blue-500 focus:bg-white transition"
-                        />
+                      <td className="py-3 px-4 font-mono font-bold text-foreground">
+                        {r.rollNo}
                       </td>
-                      <td className="py-3.5 px-4 text-center">
-                        <input
-                          type="number"
-                          value={record.assignment_marks}
-                          onChange={(e) =>
-                            handleMarkChange(student.id, 'assignment_marks', parseFloat(e.target.value) || 0)
-                          }
-                          className="w-16 bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-center text-xs focus:outline-none focus:border-blue-500 focus:bg-white transition"
-                        />
+                      <td className="py-3 px-4 font-semibold text-foreground">
+                        {r.studentName}
                       </td>
-                      <td className="py-3.5 px-4 text-center">
-                        <input
-                          type="number"
-                          value={record.practical_marks}
-                          onChange={(e) =>
-                            handleMarkChange(student.id, 'practical_marks', parseFloat(e.target.value) || 0)
-                          }
-                          className="w-16 bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-center text-xs focus:outline-none focus:border-blue-500 focus:bg-white transition"
-                        />
+                      <td className="py-3 px-4">
+                        {isPublished ? (
+                          <span className="font-bold font-mono text-foreground">
+                            {currentMarks !== null ? currentMarks : '—'}
+                          </span>
+                        ) : (
+                          <div className="relative">
+                            <input
+                              type="number"
+                              step="0.5"
+                              min="0"
+                              max={assessment.maxMarks}
+                              value={currentMarks !== null ? currentMarks : ''}
+                              onChange={(e) => handleCellChange(r.studentId, e.target.value)}
+                              placeholder="0.0"
+                              className={`w-28 px-3 py-1.5 rounded-xl font-mono text-xs font-bold text-foreground bg-muted/40 border transition-all focus:outline-hidden focus:ring-2 ${
+                                !isValid
+                                  ? 'border-rose-500 ring-2 ring-rose-500/30 bg-rose-500/5 text-rose-600'
+                                  : isModified
+                                  ? 'border-amber-500/80 bg-amber-500/10 ring-1 ring-amber-500/30'
+                                  : 'border-border/80 focus:ring-primary/40'
+                              }`}
+                            />
+                            {!isValid && (
+                              <span className="block text-[10px] text-rose-600 font-bold mt-0.5">
+                                Must be 0–{assessment.maxMarks}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
-                      <td className="py-3.5 px-4 text-center">
-                        <input
-                          type="number"
-                          value={record.exam_marks}
-                          onChange={(e) =>
-                            handleMarkChange(student.id, 'exam_marks', parseFloat(e.target.value) || 0)
-                          }
-                          className="w-16 bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-center text-xs focus:outline-none focus:border-blue-500 focus:bg-white transition"
-                        />
+                      <td className="py-3 px-4 text-center font-mono font-semibold">
+                        {currentMarks !== null ? `${gradeInfo.percentage}%` : '—'}
                       </td>
-                      <td className="py-3.5 px-4 text-center text-slate-900 font-bold">{totalScore}</td>
-                      <td className="py-3.5 px-4 text-center">
-                        <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 border rounded-full ${
-                          record.grade === 'F' ? 'bg-red-50 border-red-200 text-red-800' :
-                          record.grade === 'IP' ? 'bg-slate-100 border-slate-200 text-slate-700' :
-                          'bg-emerald-50 border-emerald-200 text-emerald-800'
-                        }`}>
-                          {record.grade}
+                      <td className="py-3 px-4 text-center">
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded-md font-mono font-bold text-xs ${
+                            gradeInfo.grade === 'O' || gradeInfo.grade === 'A+'
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                              : gradeInfo.grade === 'A' || gradeInfo.grade === 'B+'
+                              ? 'bg-primary/10 text-primary'
+                              : gradeInfo.grade === 'B' || gradeInfo.grade === 'C'
+                              ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                              : gradeInfo.grade === 'F'
+                              ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                              : 'text-muted-foreground'
+                          }`}
+                        >
+                          {gradeInfo.grade}
                         </span>
                       </td>
-                      <td className="py-3.5 px-6 text-center text-slate-500 font-mono">{record.grade_points}</td>
+                      <td className="py-3 px-4 text-center font-mono font-bold">
+                        {currentMarks !== null ? gradeInfo.gradePoints.toFixed(1) : '—'}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        {isModified ? (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 text-[10px] font-bold">
+                            Modified (orig {originalMarks})
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground font-semibold">
+                            Unchanged
+                          </span>
+                        )}
+                      </td>
                     </tr>
                   );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="p-8 text-center text-slate-400 text-xs">No student details found.</div>
-        )}
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Footer actions */}
+        <div className="p-4 bg-muted/30 border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <span className="text-muted-foreground">
+            Grading adheres to UGC 10-Point Scale tiers. Boundary values: O (&ge; 90%), A+ (&ge; 80%), A (&ge; 70%), B+ (&ge; 60%), B (&ge; 50%), C (&ge; 40%), F (&lt; 40%).
+          </span>
+
+          {!isPublished && (
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => saveMutation.mutate('draft')}
+                disabled={saveMutation.isPending}
+                className="px-4 py-2 rounded-xl border border-border/80 font-bold text-foreground hover:bg-muted transition-colors"
+              >
+                Save as Draft
+              </button>
+              <button
+                type="button"
+                onClick={() => setDiffModalOpen(true)}
+                disabled={modifiedCount === 0}
+                className="px-4 py-2 rounded-xl bg-primary text-primary-foreground font-bold shadow-xs hover:bg-primary/90 transition-colors"
+              >
+                Review Diff & Submit ({modifiedCount})
+              </button>
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* 4. EXCEL/CSV PASTE IMPORT DIALOG WITH ERROR DIAGNOSTICS */}
+      <Dialog
+        isOpen={pasteModalOpen}
+        onClose={() => setPasteModalOpen(false)}
+        title="Paste Marks from Excel / CSV"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Copy two columns from your spreadsheet (Column 1: <code>Roll Number</code>, Column 2: <code>Marks</code>) and paste below. Commas or tabs are accepted.
+          </p>
+
+          <textarea
+            rows={6}
+            placeholder={`23CSE042\t46.5\n23CSE043\t38.0\n23CSE044\t42.0`}
+            value={pasteText}
+            onChange={(e) => {
+              setPasteText(e.target.value);
+              setCsvResult(null);
+            }}
+            className="w-full p-3 font-mono text-xs rounded-xl bg-muted/40 border border-border text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/40"
+          />
+
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={handleParseCsv}
+              disabled={!pasteText.trim()}
+              className="px-4 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90 transition-colors disabled:opacity-50"
+            >
+              Validate & Parse
+            </button>
+
+            {csvResult && csvResult.success && (
+              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                <CheckCircle className="w-4 h-4" /> Parsed {csvResult.parsedCount} valid rows
+              </span>
+            )}
+          </div>
+
+          {/* Diagnostic Error Report */}
+          {csvResult && !csvResult.success && (
+            <div className="p-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 space-y-2">
+              <span className="text-xs font-bold text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4" /> Import Errors Detected ({csvResult.errors.length}):
+              </span>
+              <ul className="text-xs text-rose-800 dark:text-rose-300 space-y-1 max-h-36 overflow-y-auto font-mono">
+                {csvResult.errors.map((err, i) => (
+                  <li key={i}>
+                    Line {err.row}: [Col: {err.column}] "{err.value}" — {err.reason}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-border/60">
+            <button
+              type="button"
+              onClick={() => setPasteModalOpen(false)}
+              className="px-4 py-2 rounded-xl border border-border/80 text-xs font-bold text-foreground hover:bg-muted"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleApplyCsv}
+              disabled={!csvResult || !csvResult.success}
+              className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 disabled:opacity-50"
+            >
+              Apply to Grid
+            </button>
+          </div>
+        </div>
+      </Dialog>
+
+      {/* 5. DIFF MODAL BEFORE SUBMIT */}
+      <Dialog
+        isOpen={diffModalOpen}
+        onClose={() => setDiffModalOpen(false)}
+        title="Review Marks Changes Before Submitting"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Comparing proposed modifications against previously saved records for {assessment.name}:
+          </p>
+
+          <div className="max-h-72 overflow-y-auto rounded-2xl border border-border/60 divide-y divide-border/40">
+            {diffItems.filter((d) => d.status === 'modified').length === 0 ? (
+              <p className="p-4 text-xs text-muted-foreground text-center">
+                No marks have been modified.
+              </p>
+            ) : (
+              diffItems
+                .filter((d) => d.status === 'modified')
+                .map((diff) => (
+                  <div key={diff.studentId} className="p-3 bg-card flex items-center justify-between gap-3 text-xs">
+                    <div>
+                      <span className="font-bold text-foreground">{diff.studentName}</span>
+                      <span className="font-mono text-muted-foreground ml-2">({diff.rollNo})</span>
+                    </div>
+                    <div className="flex items-center gap-3 font-mono font-bold">
+                      <span className="text-muted-foreground line-through">
+                        {diff.originalMarks !== null ? diff.originalMarks : 'None'} ({diff.originalGrade})
+                      </span>
+                      <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
+                      <span className="text-primary">
+                        {diff.proposedMarks} ({diff.proposedGrade})
+                      </span>
+                      <span
+                        className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
+                          diff.delta >= 0
+                            ? 'bg-emerald-500/10 text-emerald-600'
+                            : 'bg-rose-500/10 text-rose-600'
+                        }`}
+                      >
+                        {diff.delta >= 0 ? `+${diff.delta}` : diff.delta}
+                      </span>
+                    </div>
+                  </div>
+                ))
+            )}
+          </div>
+
+          {actionError && (
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 text-xs font-semibold">
+              {actionError}
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-border/60">
+            <button
+              type="button"
+              onClick={() => setDiffModalOpen(false)}
+              className="px-4 py-2 rounded-xl border border-border/80 text-xs font-bold text-foreground hover:bg-muted"
+            >
+              Back to Editing
+            </button>
+            <button
+              type="button"
+              onClick={() => saveMutation.mutate('submitted')}
+              disabled={saveMutation.isPending}
+              className="px-5 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-bold shadow-md hover:bg-primary/90"
+            >
+              {saveMutation.isPending ? 'Submitting to Exam Cell...' : 'Confirm & Submit to Exam Cell'}
+            </button>
+          </div>
+        </div>
+      </Dialog>
     </div>
+  );
+}
+
+export default function FacultyExamsGradesPage() {
+  return (
+    <React.Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+        </div>
+      }
+    >
+      <FacultyExamsGradesContent />
+    </React.Suspense>
   );
 }

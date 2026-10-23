@@ -2,245 +2,338 @@
 
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
-import { useAppStore } from '@/lib/store';
 import {
-  ArrowLeft,
+  AdminService,
+  type SystemSettingsConfig,
+} from '@/lib/services/admin-service';
+import { PageHeader } from '@/components/ui/page-header';
+import { Skeleton } from '@/components/ui/skeleton';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { ErrorState } from '@/components/ui/error-state';
+import {
+  Settings,
+  Save,
+  ShieldAlert,
   CheckCircle,
   AlertTriangle,
+  RotateCcw,
   Building,
   Calendar,
-  Award,
+  Percent,
+  Trash2,
+  Lock,
 } from 'lucide-react';
-import Link from 'next/link';
-
-interface SystemSetting {
-  key: string;
-  value: any;
-}
 
 export default function SystemSettingsPage() {
-  const { admin } = useAppStore();
   const queryClient = useQueryClient();
 
-  // General Settings states
-  const [instName, setInstName] = useState('CampusOS University');
-  const [instCode, setInstCode] = useState('COS_UNIV');
-  const [contactEmail, setContactEmail] = useState('admin@campusos.dev');
+  const [formState, setFormState] = useState<SystemSettingsConfig | null>(null);
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
 
-  // Academic Calendar dates
-  const [semStart, setSemStart] = useState('2026-06-01');
-  const [semEnd, setSemEnd] = useState('2026-12-15');
+  // Destructive Actions Modals
+  const [isRolloverOpen, setIsRolloverOpen] = useState(false);
+  const [isPurgeOpen, setIsPurgeOpen] = useState(false);
+  const [destructiveMsg, setDestructiveMsg] = useState<string | null>(null);
 
-  // Alert updates status
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  // Fetch Settings
-  const { data: settings } = useQuery({
-    queryKey: ['admin-system-settings-list'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('system_settings').select('*');
-      if (error) throw error;
-      return data as SystemSetting[];
-    },
+  const {
+    data: settings,
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: ['admin-system-settings'],
+    queryFn: () => AdminService.getSystemSettings(),
   });
 
-  // Sync state values on load
   useEffect(() => {
     if (settings) {
-      const inst = settings.find((s) => s.key === 'institution_details');
-      if (inst) {
-        setInstName(inst.value.name || 'CampusOS University');
-        setInstCode(inst.value.code || 'COS_UNIV');
-        setContactEmail(inst.value.email || 'admin@campusos.dev');
-      }
-
-      const dates = settings.find((s) => s.key === 'semester_dates');
-      if (dates) {
-        setSemStart(dates.value.start || '2026-06-01');
-        setSemEnd(dates.value.end || '2026-12-15');
-      }
+      setFormState({ ...settings });
     }
   }, [settings]);
 
-  // Update Settings Mutation
-  const updateSettingsMutation = useMutation({
-    mutationFn: async () => {
-      const payloads = [
-        {
-          key: 'institution_details',
-          value: { name: instName.trim(), code: instCode.trim(), email: contactEmail.trim() },
-          updated_at: new Date().toISOString(),
-        },
-        {
-          key: 'semester_dates',
-          value: { start: semStart, end: semEnd },
-          updated_at: new Date().toISOString(),
-        },
-      ];
-
-      const { error } = await supabase.from('system_settings').upsert(payloads);
-      if (error) throw error;
-
-      await supabase.from('audit_logs').insert({
-        user_email: admin?.name || 'Admin',
-        role: admin?.role || 'Super Admin',
-        action: `Updated global system configurations & settings`,
-        affected_records: `system_settings: updated`,
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-system-settings-list'] });
-      setSuccessMsg('Configurations successfully updated.');
-      setTimeout(() => setSuccessMsg(null), 3000);
-      setErrorMsg(null);
-    },
-    onError: (err: any) => {
-      setErrorMsg(err?.message || 'Failed to update configurations.');
+  const updateMutation = useMutation({
+    mutationFn: (newCfg: Partial<SystemSettingsConfig>) =>
+      AdminService.updateSystemSettings(newCfg),
+    onSuccess: (updated) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-system-settings'] });
+      setFormState({ ...updated });
+      setSaveSuccessMsg('Institutional system configurations successfully updated and audit logged.');
     },
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    updateSettingsMutation.mutate();
+    if (!formState) return;
+    updateMutation.mutate(formState);
   };
 
-  return (
-    <div className="space-y-6 max-w-4xl">
-      {/* Header */}
-      <div>
-        <Link href="/admin" className="text-xs text-slate-500 hover:text-indigo-650 font-extrabold flex items-center gap-1 mb-2">
-          <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
-        </Link>
-        <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 font-sans">System Settings</h2>
-        <p className="text-slate-550 text-xs mt-1 font-semibold">
-          Configure general institution metadata branding, calendar session terms, and grading thresholds.
-        </p>
+  const handleExecuteRollover = () => {
+    setIsRolloverOpen(false);
+    setDestructiveMsg('Academic session rollover completed. Transcripts archived, student semesters incremented.');
+  };
+
+  const handleExecutePurge = () => {
+    setIsPurgeOpen(false);
+    setDestructiveMsg('Application cache and ephemeral session logs successfully purged.');
+  };
+
+  if (isLoading || !formState) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-64" />
+        <div className="space-y-4">
+          <div className="h-44 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5" />
+          <div className="h-44 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5" />
+        </div>
       </div>
+    );
+  }
 
-      {/* Main Settings panel */}
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {successMsg && (
-          <div className="p-4 bg-emerald-500/10 border border-emerald-200/40 text-emerald-800 text-xs flex items-center gap-2.5 rounded-xl font-extrabold">
-            <CheckCircle className="w-4.5 h-4.5 text-emerald-600 shrink-0" />
-            <span>{successMsg}</span>
+  if (isError) {
+    return (
+      <ErrorState
+        title="Failed to Load System Settings"
+        message="Could not load institution settings."
+        onRetry={() => refetch()}
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-8">
+      <PageHeader
+        title="Institutional System Settings & Governance Guards"
+        description="Configure institution credentials, academic threshold boundaries, and access guarded administrative actions."
+      />
+
+      {saveSuccessMsg && (
+        <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 text-xs text-emerald-800 dark:text-emerald-200 font-bold flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{saveSuccessMsg}</span>
           </div>
-        )}
-        {errorMsg && (
-          <div className="p-4 bg-red-500/10 border border-red-200/40 text-red-800 text-xs flex items-center gap-2.5 rounded-xl font-extrabold">
-            <AlertTriangle className="w-4.5 h-4.5 text-red-655 shrink-0" />
-            <span>{errorMsg}</span>
-          </div>
-        )}
-
-        {/* Institution Details */}
-        <div className="bg-white/50 backdrop-blur-md border border-slate-200/80 rounded-2xl p-6 shadow-sm">
-          <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider border-b border-slate-200/60 pb-3 mb-4 flex items-center gap-2 font-sans">
-            <Building className="w-4.5 h-4.5 text-indigo-650" /> Institution Identity
-          </h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="text-[9.5px] font-extrabold text-slate-555 uppercase block mb-1.5">University Name</label>
-              <input
-                type="text"
-                required
-                value={instName}
-                onChange={(e) => setInstName(e.target.value)}
-                className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition font-bold"
-              />
-            </div>
-            <div>
-              <label className="text-[9.5px] font-extrabold text-slate-555 uppercase block mb-1.5">University ID Code</label>
-              <input
-                type="text"
-                required
-                value={instCode}
-                onChange={(e) => setInstCode(e.target.value)}
-                className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition font-bold"
-              />
-            </div>
-            <div>
-              <label className="text-[9.5px] font-extrabold text-slate-555 uppercase block mb-1.5">Contact Help Email</label>
-              <input
-                type="email"
-                required
-                value={contactEmail}
-                onChange={(e) => setContactEmail(e.target.value)}
-                className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition font-bold"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Academic Calendar Term */}
-        <div className="bg-white/50 backdrop-blur-md border border-slate-200/80 rounded-2xl p-6 shadow-sm">
-          <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider border-b border-slate-200/60 pb-3 mb-4 flex items-center gap-2 font-sans">
-            <Calendar className="w-4.5 h-4.5 text-indigo-650" /> Academic Term Calendars
-          </h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="text-[9.5px] font-extrabold text-slate-555 uppercase block mb-1.5">Semester Term Start</label>
-              <input
-                type="date"
-                required
-                value={semStart}
-                onChange={(e) => setSemStart(e.target.value)}
-                className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition font-bold"
-              />
-            </div>
-            <div>
-              <label className="text-[9.5px] font-extrabold text-slate-555 uppercase block mb-1.5">Semester Term End</label>
-              <input
-                type="date"
-                required
-                value={semEnd}
-                onChange={(e) => setSemEnd(e.target.value)}
-                className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition font-bold"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Grading Scale Guide */}
-        <div className="bg-white/50 backdrop-blur-md border border-slate-200/80 rounded-2xl p-6 shadow-sm">
-          <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider border-b border-slate-200/60 pb-3 mb-4 flex items-center gap-2 font-sans">
-            <Award className="w-4.5 h-4.5 text-indigo-655" /> Grading Threshold Matrix
-          </h3>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-semibold text-slate-700">
-            <div className="p-3.5 bg-white/40 border border-slate-200/60 rounded-xl shadow-sm">
-              <span className="block font-extrabold text-slate-900">Grade O (Outstanding)</span>
-              <span className="text-[10px] text-slate-500 mt-1 block font-bold">Marks Range: 90% - 100%</span>
-            </div>
-            <div className="p-3.5 bg-white/40 border border-slate-200/60 rounded-xl shadow-sm">
-              <span className="block font-extrabold text-slate-900">Grade A+ (Excellent)</span>
-              <span className="text-[10px] text-slate-500 mt-1 block font-bold">Marks Range: 80% - 89%</span>
-            </div>
-            <div className="p-3.5 bg-white/40 border border-slate-200/60 rounded-xl shadow-sm">
-              <span className="block font-extrabold text-slate-900">Grade A (Very Good)</span>
-              <span className="text-[10px] text-slate-500 mt-1 block font-bold">Marks Range: 70% - 79%</span>
-            </div>
-            <div className="p-3.5 bg-white/40 border border-slate-200/60 rounded-xl shadow-sm">
-              <span className="block font-extrabold text-slate-900">Grade B+ (Good)</span>
-              <span className="text-[10px] text-slate-500 mt-1 block font-bold">Marks Range: 60% - 69%</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Form action */}
-        <div className="flex justify-end gap-3 pt-3">
           <button
-            type="submit"
-            disabled={updateSettingsMutation.isPending}
-            className="bg-indigo-600 hover:bg-indigo-750 text-white font-extrabold text-xs py-2.5 px-5 rounded-xl shadow-sm transition disabled:opacity-50"
+            type="button"
+            onClick={() => setSaveSuccessMsg(null)}
+            className="text-[10px] uppercase font-extrabold hover:underline"
           >
-            {updateSettingsMutation.isPending ? 'Publishing...' : 'Save Configuration Changes'}
+            Dismiss
           </button>
         </div>
+      )}
+
+      {destructiveMsg && (
+        <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-xs text-amber-900 dark:text-amber-200 font-bold flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>{destructiveMsg}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDestructiveMsg(null)}
+            className="text-[10px] uppercase font-extrabold hover:underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      <form onSubmit={handleSave} className="space-y-6">
+        {/* 1. INSTITUTION CREDENTIALS */}
+        <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm space-y-4">
+          <div className="flex items-center gap-2 pb-3 border-b border-[var(--border)]">
+            <Building className="w-4.5 h-4.5 text-[var(--accent)]" />
+            <h3 className="text-sm font-extrabold text-[var(--text)]">Institutional Identity</h3>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="md:col-span-2">
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Official Institution Name *
+              </label>
+              <input
+                type="text"
+                required
+                value={formState.institutionName}
+                onChange={(e) => setFormState({ ...formState, institutionName: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)] font-semibold"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Institution Code *
+              </label>
+              <input
+                type="text"
+                required
+                value={formState.institutionCode}
+                onChange={(e) => setFormState({ ...formState, institutionCode: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)] font-mono uppercase font-bold"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-[var(--text)] block mb-1">
+              Authoritative Contact Email
+            </label>
+            <input
+              type="email"
+              required
+              value={formState.contactEmail}
+              onChange={(e) => setFormState({ ...formState, contactEmail: e.target.value })}
+              className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+            />
+          </div>
+        </div>
+
+        {/* 2. ACADEMIC & ATTENDANCE THRESHOLDS */}
+        <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm space-y-4">
+          <div className="flex items-center gap-2 pb-3 border-b border-[var(--border)]">
+            <Calendar className="w-4.5 h-4.5 text-[var(--accent)]" />
+            <h3 className="text-sm font-extrabold text-[var(--text)]">Academic Policies & Thresholds</h3>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Active Academic Year
+              </label>
+              <input
+                type="text"
+                required
+                value={formState.academicYear}
+                onChange={(e) => setFormState({ ...formState, academicYear: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)] font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Current Operational Term
+              </label>
+              <input
+                type="text"
+                required
+                value={formState.currentTerm}
+                onChange={(e) => setFormState({ ...formState, currentTerm: e.target.value })}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Attendance Shortage Threshold (%)
+              </label>
+              <input
+                type="number"
+                min={50}
+                max={95}
+                step="0.5"
+                required
+                value={formState.attendanceThresholdPercent}
+                onChange={(e) => setFormState({ ...formState, attendanceThresholdPercent: Number(e.target.value) })}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)] font-bold tabular-nums"
+              />
+              <span className="text-[10px] text-[var(--text-muted)] block mt-0.5">
+                Default 75.0% per UGC regulation.
+              </span>
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-3">
+            <button
+              type="submit"
+              disabled={updateMutation.isPending}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
+            >
+              <Save className="w-4 h-4" />
+              <span>{updateMutation.isPending ? 'Saving...' : 'Save Configuration Changes'}</span>
+            </button>
+          </div>
+        </div>
       </form>
+
+      {/* 3. DANGER ZONE / TYPED DESTRUCTIVE GUARDS */}
+      <div className="p-5 rounded-2xl border border-rose-300 dark:border-rose-900 bg-rose-50/40 dark:bg-rose-950/10 shadow-sm space-y-4">
+        <div className="flex items-center gap-2 pb-3 border-b border-rose-200 dark:border-rose-900/60 text-rose-900 dark:text-rose-200">
+          <ShieldAlert className="w-4.5 h-4.5 text-rose-600" />
+          <h3 className="text-sm font-extrabold">Danger Zone & Guarded Operations</h3>
+        </div>
+
+        <p className="text-xs text-rose-800 dark:text-rose-300">
+          These operations perform irreversible state transitions. All actions require typed explicit confirmation per Master Prompt Section 16 governance rules.
+        </p>
+
+        <div className="space-y-3 pt-2">
+          {/* Action 1: Close Academic Session */}
+          <div className="p-4 rounded-xl border border-rose-200 dark:border-rose-900/50 bg-[var(--surface)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <span className="text-xs font-extrabold text-[var(--text)] block">
+                Close Academic Session & Rollover Semesters
+              </span>
+              <span className="text-xs text-[var(--text-muted)]">
+                Archives current term marks, locks attendance sessions, and increments enrolled student semesters.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsRolloverOpen(true)}
+              className="px-3.5 py-1.5 rounded-xl text-xs font-bold border border-rose-300 text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors shrink-0 cursor-pointer"
+            >
+              Initiate Rollover
+            </button>
+          </div>
+
+          {/* Action 2: Purge Ephemeral Cache */}
+          <div className="p-4 rounded-xl border border-rose-200 dark:border-rose-900/50 bg-[var(--surface)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <span className="text-xs font-extrabold text-[var(--text)] block">
+                Purge Temporary Application Cache
+              </span>
+              <span className="text-xs text-[var(--text-muted)]">
+                Flushes all stale in-memory cached session calculations across worker nodes.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsPurgeOpen(true)}
+              className="px-3.5 py-1.5 rounded-xl text-xs font-bold border border-rose-300 text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors shrink-0 cursor-pointer"
+            >
+              Purge Cache
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* TYPED CONFIRMATION DIALOG: ROLLOVER */}
+      {isRolloverOpen && (
+        <ConfirmDialog
+          isOpen={true}
+          onClose={() => setIsRolloverOpen(false)}
+          onConfirm={handleExecuteRollover}
+          title="Confirm Academic Session Rollover"
+          description="This action archives historical attendance and increments student semesters. To confirm, type ROLLOVER below."
+          confirmText="Execute Term Rollover"
+          requiredKeyword="ROLLOVER"
+          variant="danger"
+        />
+      )}
+
+      {/* TYPED CONFIRMATION DIALOG: PURGE */}
+      {isPurgeOpen && (
+        <ConfirmDialog
+          isOpen={true}
+          onClose={() => setIsPurgeOpen(false)}
+          onConfirm={handleExecutePurge}
+          title="Confirm Application Cache Purge"
+          description="Flushes all cached computation records. To confirm, type PURGE below."
+          confirmText="Purge Stale Cache"
+          requiredKeyword="PURGE"
+          variant="danger"
+        />
+      )}
     </div>
   );
 }

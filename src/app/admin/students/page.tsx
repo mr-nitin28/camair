@@ -1,659 +1,844 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
-import { useAppStore } from '@/lib/store';
-import { motion, AnimatePresence } from 'framer-motion';
+import {
+  AdminService,
+  type StudentRegistryItem,
+  type BulkImportResult,
+  type StudentImportRecord,
+} from '@/lib/services/admin-service';
+import { PageHeader } from '@/components/ui/page-header';
+import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { Dialog } from '@/components/ui/dialog';
+import { StatusBadge } from '@/components/ui/status-badge';
 import {
   Users,
   Search,
   Plus,
-  ArrowLeft,
-  Trash2,
-  Calendar,
-  Phone,
-  Mail,
-  MapPin,
-  Building,
-  GraduationCap,
-  Award,
-  CreditCard,
-  CalendarDays,
+  FileSpreadsheet,
   CheckCircle,
   AlertTriangle,
-  Loader2,
+  XCircle,
+  Mail,
+  Building,
+  RefreshCw,
+  PowerOff,
+  UserCheck,
+  ChevronRight,
+  Download,
+  Edit3,
 } from 'lucide-react';
-import Link from 'next/link';
 
-interface Student {
-  id: string;
-  student_id: string;
-  first_name: string;
-  last_name: string;
-  email: string;
-  phone: string | null;
-  address: string | null;
-  department_id: string;
-  course_id: string;
-  semester_id: string;
-  cgpa: number;
-  sgpa: number;
-  status: 'Active' | 'Suspended' | 'Graduated';
-  admission_date: string;
-  departments?: { name: string; code: string };
-  courses?: { name: string; code: string };
-  semesters?: { number: number };
-}
+const sampleValidCsv = `student_id,first_name,last_name,email,department_code,course_code,semester,section
+EN2024CSE101,Ishaan,Sharma,ishaan.sharma@campusos.dev,CSE,BTECH-CSE,2,A
+EN2024CSE102,Kavya,Nair,kavya.nair@campusos.dev,CSE,BTECH-CSE,2,A
+EN2024ECE201,Aditya,Verma,aditya.verma@campusos.dev,ECE,BTECH-ECE,2,B`;
+
+const sampleErrorCsv = `student_id,first_name,last_name,email,department_code,course_code,semester,section
+EN2023CSE042,Aarav,Patel,duplicate.id@campusos.dev,CSE,BTECH-CSE,6,A
+EN2024CSE105,Siddharth,Rao,invalid-email-format,CSE,BTECH-CSE,2,A
+EN2024CSE106,Neha,Gupta,neha.gupta@campusos.dev,INVALID_DEPT,BTECH-CSE,2,A
+EN2024CSE107,,MissingFirstName,missing.first@campusos.dev,CSE,BTECH-CSE,2,A
+EN2024CSE108,Rahul,Kapoor,rahul.kapoor@campusos.dev,CSE,BTECH-CSE,12,A`;
 
 export default function StudentRegistryPage() {
-  const { admin } = useAppStore();
   const queryClient = useQueryClient();
 
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
-  
-  // Registration Form States
-  const [isRegisterOpen, setIsRegisterOpen] = useState(false);
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [email, setEmail] = useState('');
-  const [studentIdInput, setStudentIdInput] = useState('');
-  const [phoneInput, setPhoneInput] = useState('');
-  const [addressInput, setAddressInput] = useState('');
-  const [deptId, setDeptId] = useState('');
-  const [courseId, setCourseId] = useState('');
-  const [semId, setSemId] = useState('');
-  
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [departmentCode, setDepartmentCode] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
 
-  // Fetch Lookups (depts, courses, sems)
-  const { data: lookupData } = useQuery({
-    queryKey: ['admin-lookups-students'],
-    queryFn: async () => {
-      const { data: depts } = await supabase.from('departments').select('*');
-      const { data: courses } = await supabase.from('courses').select('*');
-      const { data: semesters } = await supabase.from('semesters').select('*, courses(*)');
-      return {
-        depts: depts || [],
-        courses: courses || [],
-        semesters: semesters || [],
-      };
-    },
+  // Create Student Modal
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [newStudentId, setNewStudentId] = useState('');
+  const [newFirstName, setNewFirstName] = useState('');
+  const [newLastName, setNewLastName] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [newDept, setNewDept] = useState('CSE');
+  const [newSemester, setNewSemester] = useState(1);
+  const [newSection, setNewSection] = useState('A');
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  // Edit Student Modal
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editingStudent, setEditingStudent] = useState<StudentRegistryItem | null>(null);
+  const [editFirstName, setEditFirstName] = useState('');
+  const [editLastName, setEditLastName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editDept, setEditDept] = useState('CSE');
+  const [editSemester, setEditSemester] = useState(1);
+  const [editSection, setEditSection] = useState('A');
+  const [editError, setEditError] = useState<string | null>(null);
+
+  // Bulk Import Modal with Dry Run
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [csvContent, setCsvContent] = useState('');
+  const [dryRunResult, setDryRunResult] = useState<BulkImportResult<StudentImportRecord> | null>(null);
+  const [importCommitSuccess, setImportCommitSuccess] = useState<string | null>(null);
+
+  // Fetch Students
+  const {
+    data: students,
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: ['admin-students', departmentCode, statusFilter, search],
+    queryFn: () =>
+      AdminService.getStudents({
+        departmentCode,
+        status: statusFilter,
+        search,
+      }),
   });
 
-  // Fetch Students Registry
-  const { data: students, isLoading } = useQuery({
-    queryKey: ['admin-students-registry'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('students')
-        .select('*, departments(*), courses(*), semesters(*)')
-        .order('student_id', { ascending: true });
-      if (error) throw error;
-      return data as Student[];
-    },
-  });
-
-  // Set default selections
-  React.useEffect(() => {
-    if (students && students.length > 0 && !selectedStudentId) {
-      setSelectedStudentId(students[0].id);
-    }
-  }, [students, selectedStudentId]);
-
-  // Fetch Academic Details for Selected Student
-  const { data: dossier } = useQuery({
-    queryKey: ['admin-student-dossier', selectedStudentId],
-    queryFn: async () => {
-      if (!selectedStudentId) return null;
-      const { data: attendance } = await supabase.from('attendance').select('*, subjects(*)').eq('student_id', selectedStudentId);
-      const { data: results } = await supabase.from('results').select('*, subjects(*)').eq('student_id', selectedStudentId);
-      const { data: fees } = await supabase.from('payments').select('*, fees(*)').eq('student_id', selectedStudentId);
-      return {
-        attendance: attendance || [],
-        results: results || [],
-        fees: fees || [],
-      };
-    },
-    enabled: !!selectedStudentId,
-  });
-
-  // Register Student Mutation
-  const registerStudentMutation = useMutation({
-    mutationFn: async () => {
-      const studentUuid = crypto.randomUUID();
-      
-      // 1. Create auth user via security definer RPC
-      const { error: authError } = await supabase.rpc('admin_create_user', {
-        p_id: studentUuid,
-        p_email: email.trim(),
-        p_password: 'password123', // Default password
-        p_first_name: firstName.trim(),
-        p_last_name: lastName.trim(),
-        p_role: 'Student',
-      });
-
-      if (authError) throw authError;
-
-      // 2. Create student profile
-      const { error: profileError } = await supabase.from('students').insert({
-        id: studentUuid,
-        student_id: studentIdInput.trim(),
-        first_name: firstName.trim(),
-        last_name: lastName.trim(),
-        email: email.trim(),
-        phone: phoneInput.trim() || null,
-        address: addressInput.trim() || null,
-        department_id: deptId,
-        course_id: courseId,
-        semester_id: semId,
-        status: 'Active',
-      });
-
-      if (profileError) throw profileError;
-
-      // 3. Log Action
-      await supabase.from('audit_logs').insert({
-        user_email: admin?.name || 'Admin',
-        role: admin?.role || 'Super Admin',
-        action: `Enrolled student: ${firstName} ${lastName} (${studentIdInput})`,
-        affected_records: `students: ${studentUuid}`,
-      });
-    },
+  // Create Mutation
+  const createMutation = useMutation({
+    mutationFn: (data: Parameters<typeof AdminService.createStudent>[0]) =>
+      AdminService.createStudent(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-students-registry'] });
-      setIsRegisterOpen(false);
-      setFirstName('');
-      setLastName('');
-      setEmail('');
-      setStudentIdInput('');
-      setPhoneInput('');
-      setAddressInput('');
-      setSuccessMsg('Student enrolled successfully. (Default password: password123)');
-      setTimeout(() => setSuccessMsg(null), 4000);
-      setErrorMsg(null);
+      queryClient.invalidateQueries({ queryKey: ['admin-students'] });
+      setIsCreateOpen(false);
+      setNewStudentId('');
+      setNewFirstName('');
+      setNewLastName('');
+      setNewEmail('');
+      setNewPhone('');
+      setCreateError(null);
     },
-    onError: (err: any) => {
-      setErrorMsg(err?.message || 'Failed to enroll student.');
+    onError: (err: Error) => {
+      setCreateError(err.message || 'Failed to create student.');
     },
   });
 
-  // Delete Student Mutation
-  const deleteStudentMutation = useMutation({
-    mutationFn: async (id: string) => {
-      // Find name for log
-      const s = students?.find((st) => st.id === id);
-      const studentName = s ? `${s.first_name} ${s.last_name}` : id;
-
-      // Delete from public.students (cascade will delete related data, or delete auth user directly)
-      const { error } = await supabase.from('students').delete().eq('id', id);
-      if (error) throw error;
-
-      // Log Action
-      await supabase.from('audit_logs').insert({
-        user_email: admin?.name || 'Admin',
-        role: admin?.role || 'Super Admin',
-        action: `De-enrolled student: ${studentName}`,
-        affected_records: `students: ${id}`,
-      });
-    },
+  // Update Mutation
+  const updateMutation = useMutation({
+    mutationFn: (data: { id: string; updates: Partial<StudentRegistryItem> }) =>
+      AdminService.updateStudent(data.id, data.updates),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-students-registry'] });
-      setSelectedStudentId(null);
+      queryClient.invalidateQueries({ queryKey: ['admin-students'] });
+      setIsEditOpen(false);
+      setEditingStudent(null);
+      setEditError(null);
+    },
+    onError: (err: Error) => {
+      setEditError(err.message || 'Failed to update student.');
     },
   });
 
-  const handleRegisterSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!firstName || !lastName || !email || !studentIdInput || !deptId || !courseId || !semId) {
-      setErrorMsg('Please fill in all mandatory fields.');
-      return;
-    }
-    setErrorMsg(null);
-    registerStudentMutation.mutate();
+  const handleOpenEdit = (stu: StudentRegistryItem) => {
+    setEditingStudent(stu);
+    setEditFirstName(stu.firstName);
+    setEditLastName(stu.lastName);
+    setEditEmail(stu.email);
+    setEditPhone(stu.phone || '');
+    setEditDept(stu.departmentCode);
+    setEditSemester(stu.semester);
+    setEditSection(stu.section);
+    setEditError(null);
+    setIsEditOpen(true);
   };
 
-  // Filter students
-  const filteredStudents = useMemo(() => {
-    if (!students) return [];
-    return students.filter((s) => {
-      const q = searchQuery.toLowerCase();
-      const fullName = `${s.first_name} ${s.last_name}`.toLowerCase();
-      return (
-        fullName.includes(q) ||
-        s.student_id.toLowerCase().includes(q) ||
-        s.email.toLowerCase().includes(q)
-      );
+  const handleEditSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingStudent) return;
+    updateMutation.mutate({
+      id: editingStudent.id,
+      updates: {
+        firstName: editFirstName,
+        lastName: editLastName,
+        email: editEmail,
+        phone: editPhone,
+        departmentCode: editDept,
+        semester: editSemester,
+        section: editSection,
+      },
     });
-  }, [students, searchQuery]);
+  };
 
-  const activeStudent = students?.find((s) => s.id === selectedStudentId);
+  // Deactivate / Reactivate Mutations (soft delete with retained history)
+  const deactivateMutation = useMutation({
+    mutationFn: (id: string) => AdminService.deactivateStudent(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-students'] }),
+  });
 
-  // Stats calculation
-  const attendanceRate = useMemo(() => {
-    if (!dossier?.attendance || dossier.attendance.length === 0) return 100;
-    const present = dossier.attendance.filter((a) => a.status === 'Present' || a.status === 'Late').length;
-    return Math.round((present / dossier.attendance.length) * 100);
-  }, [dossier]);
+  const reactivateMutation = useMutation({
+    mutationFn: (id: string) => AdminService.reactivateStudent(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-students'] }),
+  });
+
+  // Commit Bulk Import Mutation
+  const commitImportMutation = useMutation({
+    mutationFn: (records: StudentImportRecord[]) =>
+      AdminService.commitStudentBulkImport(records),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['admin-students'] });
+      setImportCommitSuccess(`Successfully imported ${res.committedCount} student records.`);
+      setDryRunResult(null);
+      setCsvContent('');
+    },
+  });
+
+  const handleRunDryRun = () => {
+    if (!csvContent.trim()) return;
+    const res = AdminService.validateStudentBulkImport(csvContent);
+    setDryRunResult(res);
+    setImportCommitSuccess(null);
+  };
+
+  const handleCreateSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    createMutation.mutate({
+      studentId: newStudentId,
+      firstName: newFirstName,
+      lastName: newLastName,
+      email: newEmail,
+      phone: newPhone,
+      departmentCode: newDept,
+      courseCode: 'BTECH-CSE',
+      semester: newSemester,
+      section: newSection,
+    });
+  };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-64" />
+        <div className="h-12 w-full bg-[var(--surface)] rounded-2xl border border-[var(--border)]" />
+        <div className="space-y-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-16 w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)]" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (isError || !students) {
+    return (
+      <ErrorState
+        title="Failed to Load Student Registry"
+        message="Could not load students directory."
+        onRetry={() => refetch()}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <Link href="/admin" className="text-xs text-slate-500 hover:text-indigo-650 font-extrabold flex items-center gap-1 mb-2">
-            <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
-          </Link>
-          <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 font-sans">Student Registry Desk</h2>
-          <p className="text-slate-550 text-xs mt-1 font-semibold">
-            Review student rosters, manage enrollments, and check complete academic portfolios.
-          </p>
+      <PageHeader
+        title="Student Registry & Bulk Ingestion"
+        description="Manage student enrollment status, soft-deactivations with audit trails, and execute dry-run CSV bulk imports."
+        actions={
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setIsImportOpen(true);
+                setDryRunResult(null);
+                setImportCommitSuccess(null);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors shadow-xs cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+              <span>Bulk Import CSV</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsCreateOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors shadow-xs cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Register Student</span>
+            </button>
+          </div>
+        }
+      />
+
+      {/* FILTERS & SEARCH BAR */}
+      <div className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="relative w-full sm:w-80">
+          <Search className="w-4 h-4 text-[var(--text-muted)] absolute left-3 top-2.5" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by ID, name, or email..."
+            className="w-full pl-9 pr-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-xs text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+          />
         </div>
 
-        <button
-          onClick={() => {
-            if (lookupData?.depts.length && lookupData?.courses.length && lookupData?.semesters.length) {
-              setDeptId(lookupData.depts[0].id);
-              setCourseId(lookupData.courses[0].id);
-              setSemId(lookupData.semesters[0].id);
-            }
-            setIsRegisterOpen(true);
-          }}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs py-2.5 px-4 rounded-xl shadow-sm flex items-center gap-1.5 transition self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" /> Enroll New Student
-        </button>
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <select
+            value={departmentCode}
+            onChange={(e) => setDepartmentCode(e.target.value)}
+            className="px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)] font-semibold"
+          >
+            <option value="all">All Departments</option>
+            <option value="CSE">Computer Science (CSE)</option>
+            <option value="ECE">Electronics (ECE)</option>
+            <option value="ME">Mechanical (ME)</option>
+          </select>
+
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)] font-semibold"
+          >
+            <option value="all">All Statuses</option>
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+          </select>
+        </div>
       </div>
 
-      {/* Success notification */}
-      <AnimatePresence>
-        {successMsg && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="p-4 bg-emerald-500/10 border border-emerald-200/40 text-emerald-800 text-xs flex items-center gap-2.5 rounded-xl font-extrabold"
-          >
-            <CheckCircle className="w-4.5 h-4.5 text-emerald-600 shrink-0" />
-            <span>{successMsg}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* STUDENTS TABLE */}
+      {students.length === 0 ? (
+        <EmptyState
+          title="No Students Found"
+          description="No student records match the active search and department filters."
+        />
+      ) : (
+        <div className="overflow-x-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm">
+          <table className="w-full text-xs text-left">
+            <thead>
+              <tr className="border-b border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-muted)] uppercase text-[10px] font-extrabold tracking-wider">
+                <th className="py-3 px-4">Student ID</th>
+                <th className="py-3 px-4">Full Name</th>
+                <th className="py-3 px-4">Department & Term</th>
+                <th className="py-3 px-4">Attendance</th>
+                <th className="py-3 px-4">Status</th>
+                <th className="py-3 px-4 text-right">Audit & Controls</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border)]">
+              {students.map((stu) => (
+                <tr key={stu.id} className="hover:bg-[var(--surface-2)] transition-colors">
+                  <td className="py-3 px-4 font-mono font-extrabold text-[var(--accent)]">
+                    {stu.studentId}
+                  </td>
+                  <td className="py-3 px-4">
+                    <span className="font-bold text-[var(--text)] block">{stu.fullName}</span>
+                    <span className="text-[11px] text-[var(--text-muted)]">{stu.email}</span>
+                  </td>
+                  <td className="py-3 px-4 font-semibold text-[var(--text)]">
+                    {stu.departmentCode} • Sem {stu.semester} ({stu.section})
+                  </td>
+                  <td className="py-3 px-4">
+                    <span
+                      className={`font-extrabold tabular-nums px-2 py-0.5 rounded ${
+                        stu.attendanceRate >= 75
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
+                          : 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400'
+                      }`}
+                    >
+                      {stu.attendanceRate}%
+                    </span>
+                  </td>
+                  <td className="py-3 px-4">
+                    <StatusBadge
+                      status={stu.status === 'Active' ? 'success' : 'neutral'}
+                      label={stu.status}
+                    />
+                  </td>
+                  <td className="py-3 px-4 text-right space-x-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEdit(stu)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--accent-soft)] transition-colors cursor-pointer"
+                      title="Edit Student Record"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Edit</span>
+                    </button>
+                    {stu.status === 'Active' ? (
+                      <button
+                        type="button"
+                        onClick={() => deactivateMutation.mutate(stu.id)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-[var(--text-muted)] hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors cursor-pointer"
+                        title="Deactivate Student (Preserves history & transcripts)"
+                      >
+                        <PowerOff className="w-3.5 h-3.5" />
+                        <span>Deactivate</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => reactivateMutation.mutate(stu.id)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors cursor-pointer"
+                        title="Reactivate Student"
+                      >
+                        <UserCheck className="w-3.5 h-3.5" />
+                        <span>Reactivate</span>
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-      {/* Master Grid Split */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Left column: Student list registry */}
-        <div className="lg:col-span-2 bg-white/50 backdrop-blur-md border border-slate-200/80 rounded-2xl overflow-hidden flex flex-col h-[70vh] shadow-sm">
-          {/* Search bar */}
-          <div className="p-4 border-b border-slate-200/60 flex items-center gap-3 bg-white/20">
-            <div className="relative flex-grow">
-              <Search className="absolute left-3.5 top-3 w-4 h-4 text-slate-450" />
+      {/* 1. REGISTER STUDENT MODAL */}
+      <Dialog
+        isOpen={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        title="Register New Student"
+        description="Create an individual student enrollment record."
+      >
+        <form onSubmit={handleCreateSubmit} className="space-y-4">
+          {createError && (
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300 font-semibold flex items-center gap-2">
+              <XCircle className="w-4 h-4 shrink-0" />
+              <span>{createError}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Student ID *
+              </label>
               <input
                 type="text"
-                placeholder="Search students by name, id, email..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-white/40 border border-slate-200/60 rounded-xl py-2 pl-10 pr-4 text-xs text-slate-800 placeholder-slate-450 focus:outline-none focus:border-indigo-500 transition font-semibold"
+                required
+                value={newStudentId}
+                onChange={(e) => setNewStudentId(e.target.value)}
+                placeholder="e.g. EN2024CSE099"
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)] uppercase font-mono"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Department *
+              </label>
+              <select
+                value={newDept}
+                onChange={(e) => setNewDept(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              >
+                <option value="CSE">Computer Science (CSE)</option>
+                <option value="ECE">Electronics (ECE)</option>
+                <option value="ME">Mechanical (ME)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                First Name *
+              </label>
+              <input
+                type="text"
+                required
+                value={newFirstName}
+                onChange={(e) => setNewFirstName(e.target.value)}
+                placeholder="e.g. Ishaan"
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Last Name *
+              </label>
+              <input
+                type="text"
+                required
+                value={newLastName}
+                onChange={(e) => setNewLastName(e.target.value)}
+                placeholder="e.g. Sharma"
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
               />
             </div>
           </div>
 
-          {/* Roster table */}
-          <div className="flex-grow overflow-y-auto">
-            {isLoading ? (
-              <div className="p-12 text-center text-slate-500">
-                <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mx-auto mb-3" />
-                <p className="text-xs font-bold">Loading student roster...</p>
-              </div>
-            ) : filteredStudents.length > 0 ? (
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="bg-white/30 border-b border-slate-200/60 text-slate-550 uppercase font-extrabold text-[9.5px] tracking-wider">
-                    <th className="py-3 px-4">Student details</th>
-                    <th className="py-3 px-4">Campus ID</th>
-                    <th className="py-3 px-4">Department & Course</th>
-                    <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4 text-right">Review</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200/60 font-semibold text-slate-700">
-                  {filteredStudents.map((s) => (
-                    <tr
-                      key={s.id}
-                      onClick={() => setSelectedStudentId(s.id)}
-                      className={`hover:bg-white/40 transition cursor-pointer ${
-                        selectedStudentId === s.id ? 'bg-indigo-50/50' : ''
-                      }`}
-                    >
-                      <td className="py-3.5 px-4">
-                        <div className="text-slate-900 font-extrabold">{s.first_name} {s.last_name}</div>
-                        <div className="text-[10px] text-slate-500 mt-0.5 font-medium">{s.email}</div>
-                      </td>
-                      <td className="py-3.5 px-4 text-slate-800 font-sans font-semibold">{s.student_id}</td>
-                      <td className="py-3.5 px-4">
-                        <div className="text-slate-800 font-bold">{s.departments?.name}</div>
-                        <div className="text-[10px] text-slate-500 mt-0.5 font-medium">{s.courses?.code} • Semester {s.semesters?.number || 6}</div>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span className={`text-[9.5px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
-                          s.status === 'Active' ? 'bg-emerald-500/10 border-emerald-250/20 text-emerald-800' :
-                          s.status === 'Suspended' ? 'bg-red-500/10 border-red-250/20 text-red-800' :
-                          'bg-slate-100 border-slate-200 text-slate-600'
-                        }`}>
-                          {s.status}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (confirm(`Are you sure you want to de-enroll ${s.first_name} ${s.last_name}?`)) {
-                              deleteStudentMutation.mutate(s.id);
-                            }
-                          }}
-                          className="p-1.5 rounded-lg text-slate-450 hover:text-red-650 hover:bg-red-50 transition"
-                          title="De-enroll student"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div className="p-12 text-center text-slate-500 text-xs font-bold">No students registered in search.</div>
-            )}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Official Email *
+              </label>
+              <input
+                type="email"
+                required
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                placeholder="ishaan.sharma@campusos.dev"
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Phone
+              </label>
+              <input
+                type="tel"
+                value={newPhone}
+                onChange={(e) => setNewPhone(e.target.value)}
+                placeholder="+91 98765 00000"
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
+            </div>
           </div>
-        </div>
 
-        {/* Right column: Student Dossier Profile details */}
-        <div className="lg:col-span-1">
-          {activeStudent ? (
-            <div className="bg-white/50 backdrop-blur-md border border-slate-200/80 rounded-2xl p-6 shadow-sm space-y-6">
-              {/* Profile Card Header */}
-              <div className="flex gap-3.5 pb-4 border-b border-slate-200/60">
-                <div className="w-12 h-12 rounded-full bg-white/40 border border-slate-200 flex items-center justify-center font-black text-slate-800 uppercase text-sm shadow-inner shrink-0">
-                  {activeStudent.first_name[0]}{activeStudent.last_name[0]}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Semester
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={8}
+                value={newSemester}
+                onChange={(e) => setNewSemester(Number(e.target.value))}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Section
+              </label>
+              <input
+                type="text"
+                value={newSection}
+                onChange={(e) => setNewSection(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)] uppercase"
+              />
+            </div>
+          </div>
+
+          <div className="pt-3 flex justify-end gap-2 border-t border-[var(--border)]">
+            <button
+              type="button"
+              onClick={() => setIsCreateOpen(false)}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={createMutation.isPending}
+              className="px-4 py-1.5 rounded-xl text-xs font-bold bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50"
+            >
+              {createMutation.isPending ? 'Saving...' : 'Register Student'}
+            </button>
+          </div>
+        </form>
+      </Dialog>
+
+      {/* EDIT STUDENT MODAL */}
+      <Dialog
+        isOpen={isEditOpen}
+        onClose={() => {
+          setIsEditOpen(false);
+          setEditingStudent(null);
+        }}
+        title={`Edit Student: ${editingStudent?.studentId || ''}`}
+        description="Update enrolled student details with audit logging."
+      >
+        <form onSubmit={handleEditSubmit} className="space-y-4">
+          {editError && (
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300 font-semibold flex items-center gap-2">
+              <XCircle className="w-4 h-4 shrink-0" />
+              <span>{editError}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Student ID
+              </label>
+              <input
+                type="text"
+                disabled
+                value={editingStudent?.studentId || ''}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-xs text-[var(--text-muted)] uppercase font-mono cursor-not-allowed"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Department *
+              </label>
+              <select
+                value={editDept}
+                onChange={(e) => setEditDept(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              >
+                <option value="CSE">Computer Science (CSE)</option>
+                <option value="ECE">Electronics (ECE)</option>
+                <option value="ME">Mechanical (ME)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                First Name *
+              </label>
+              <input
+                type="text"
+                required
+                value={editFirstName}
+                onChange={(e) => setEditFirstName(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Last Name *
+              </label>
+              <input
+                type="text"
+                required
+                value={editLastName}
+                onChange={(e) => setEditLastName(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Institutional Email *
+              </label>
+              <input
+                type="email"
+                required
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Phone
+              </label>
+              <input
+                type="tel"
+                value={editPhone}
+                onChange={(e) => setEditPhone(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Semester
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={8}
+                value={editSemester}
+                onChange={(e) => setEditSemester(Number(e.target.value))}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Section
+              </label>
+              <input
+                type="text"
+                value={editSection}
+                onChange={(e) => setEditSection(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)] uppercase"
+              />
+            </div>
+          </div>
+
+          <div className="pt-3 flex justify-end gap-2 border-t border-[var(--border)]">
+            <button
+              type="button"
+              onClick={() => {
+                setIsEditOpen(false);
+                setEditingStudent(null);
+              }}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={updateMutation.isPending}
+              className="px-4 py-1.5 rounded-xl text-xs font-bold bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50"
+            >
+              {updateMutation.isPending ? 'Updating...' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </Dialog>
+
+      {/* 2. BULK IMPORT WITH DRY RUN MODAL */}
+      <Dialog
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+        title="Student Bulk Import with Dry Run Validation"
+        description="Upload or paste student CSV data. CampusOS executes a strict dry run before committing."
+        className="max-w-3xl"
+      >
+        <div className="space-y-4">
+          {importCommitSuccess && (
+            <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 text-xs text-emerald-800 dark:text-emerald-200 font-bold flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{importCommitSuccess}</span>
+            </div>
+          )}
+
+          {/* Quick Sample Buttons */}
+          <div className="flex items-center gap-2 pb-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
+              Quick Samples:
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setCsvContent(sampleValidCsv);
+                setDryRunResult(null);
+              }}
+              className="px-2 py-1 rounded text-[11px] font-semibold border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)] hover:border-[var(--accent)]"
+            >
+              Paste Valid Sample CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setCsvContent(sampleErrorCsv);
+                setDryRunResult(null);
+              }}
+              className="px-2 py-1 rounded text-[11px] font-semibold border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)] hover:border-[var(--accent)]"
+            >
+              Paste Sample With Duplicate/Invalid Errors
+            </button>
+          </div>
+
+          {/* CSV Input Area */}
+          <div>
+            <label className="text-xs font-bold text-[var(--text)] block mb-1">
+              CSV Content (Headers: student_id, first_name, last_name, email, department_code, course_code, semester, section)
+            </label>
+            <textarea
+              rows={6}
+              value={csvContent}
+              onChange={(e) => setCsvContent(e.target.value)}
+              placeholder="Paste comma-separated rows here..."
+              className="w-full p-3 font-mono text-xs rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-[var(--text-muted)]">
+              Dry run validates against duplicates and foreign key constraints without modifying the database.
+            </span>
+            <button
+              type="button"
+              onClick={handleRunDryRun}
+              disabled={!csvContent.trim()}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Run Dry Run Validation</span>
+            </button>
+          </div>
+
+          {/* DRY RUN RESULT BREAKDOWN */}
+          {dryRunResult && (
+            <div className="space-y-4 pt-3 border-t border-[var(--border)]">
+              {/* Summary Stats Strip */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="p-3 rounded-xl bg-[var(--surface-2)] border border-[var(--border)]">
+                  <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase block">Total Rows</span>
+                  <span className="text-lg font-extrabold text-[var(--text)] tabular-nums">{dryRunResult.totalRows}</span>
                 </div>
-                <div>
-                  <h3 className="text-sm font-extrabold text-slate-900 font-sans">{activeStudent.first_name} {activeStudent.last_name}</h3>
-                  <span className="text-[10px] text-slate-500 font-semibold block mt-0.5">{activeStudent.student_id}</span>
-                  <span className="text-[9.5px] font-extrabold text-indigo-650 uppercase mt-1 block">Semester {activeStudent.semesters?.number || 6}</span>
+                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50">
+                  <span className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 uppercase block">Valid Rows</span>
+                  <span className="text-lg font-extrabold text-emerald-700 dark:text-emerald-400 tabular-nums">{dryRunResult.validRows}</span>
+                </div>
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50">
+                  <span className="text-[10px] font-bold text-rose-800 dark:text-rose-300 uppercase block">Errors Found</span>
+                  <span className="text-lg font-extrabold text-rose-700 dark:text-rose-400 tabular-nums">{dryRunResult.invalidRows}</span>
                 </div>
               </div>
 
-              {/* dossier Contact Info */}
-              <div className="space-y-3.5 text-xs font-bold text-slate-700">
-                <div className="flex items-center gap-2">
-                  <Mail className="w-4 h-4 text-slate-450 shrink-0" />
-                  <span className="truncate">{activeStudent.email}</span>
-                </div>
-                {activeStudent.phone && (
-                  <div className="flex items-center gap-2">
-                    <Phone className="w-4 h-4 text-slate-450 shrink-0" />
-                    <span>{activeStudent.phone}</span>
-                  </div>
-                )}
-                {activeStudent.address && (
-                  <div className="flex items-start gap-2">
-                    <MapPin className="w-4 h-4 text-slate-450 shrink-0 mt-0.5" />
-                    <span className="leading-tight text-slate-655">{activeStudent.address}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Dossier Academic metrics */}
-              <div className="grid grid-cols-2 gap-4 border-t border-slate-200/60 pt-4">
-                <div className="bg-white/40 border border-slate-200 p-3 rounded-xl flex items-center gap-2.5">
-                  <Award className="w-5 h-5 text-indigo-600" />
-                  <div>
-                    <span className="text-[9px] font-extrabold uppercase text-slate-500 block">CGPA / SGPA</span>
-                    <span className="text-xs font-extrabold text-slate-900 block mt-0.5">
-                      {activeStudent.cgpa} / {activeStudent.sgpa}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="bg-white/40 border border-slate-200 p-3 rounded-xl flex items-center gap-2.5">
-                  <CalendarDays className="w-5 h-5 text-indigo-600" />
-                  <div>
-                    <span className="text-[9px] font-extrabold uppercase text-slate-500 block">Attendance</span>
-                    <span className="text-xs font-extrabold text-slate-900 block mt-0.5">
-                      {attendanceRate}%
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Dossier transaction logs */}
-              {dossier && (
-                <div className="space-y-4 border-t border-slate-200/60 pt-4 text-xs font-semibold">
-                  <div>
-                    <span className="text-[9.5px] font-extrabold text-slate-500 uppercase block mb-2">Grade Logs</span>
-                    {dossier.results.length > 0 ? (
-                      <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                        {dossier.results.map((res) => (
-                          <div key={res.id} className="flex items-center justify-between bg-white/30 p-2 rounded border border-slate-200/60 text-[11px] font-bold text-slate-700">
-                            <span className="truncate">{res.subjects?.name}</span>
-                            <span className="font-extrabold text-slate-800 bg-white border border-slate-200 px-1.5 py-0.5 rounded text-[9.5px]">
-                              {res.grade}
-                            </span>
-                          </div>
+              {/* ITEMIZED ERROR REPORT TABLE */}
+              {dryRunResult.errors.length > 0 && (
+                <div className="space-y-1.5">
+                  <h4 className="text-xs font-extrabold text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4" />
+                    <span>Itemized Validation Errors ({dryRunResult.errors.length}):</span>
+                  </h4>
+                  <div className="max-h-48 overflow-y-auto rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/20">
+                    <table className="w-full text-xs text-left">
+                      <thead>
+                        <tr className="border-b border-rose-200 dark:border-rose-900/40 text-rose-900 dark:text-rose-300 font-extrabold text-[10px] uppercase">
+                          <th className="py-2 px-3">Row #</th>
+                          <th className="py-2 px-3">Column</th>
+                          <th className="py-2 px-3">Offending Value</th>
+                          <th className="py-2 px-3">Reason for Rejection</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-rose-200/60 dark:divide-rose-900/30 font-medium">
+                        {dryRunResult.errors.map((err, idx) => (
+                          <tr key={idx}>
+                            <td className="py-2 px-3 font-mono font-bold text-rose-800 dark:text-rose-300">
+                              Row {err.row}
+                            </td>
+                            <td className="py-2 px-3 font-mono">{err.column}</td>
+                            <td className="py-2 px-3 font-mono text-[11px] max-w-xs truncate">{err.value || '<empty>'}</td>
+                            <td className="py-2 px-3 text-rose-700 dark:text-rose-300">{err.reason}</td>
+                          </tr>
                         ))}
-                      </div>
-                    ) : (
-                      <span className="text-slate-500 italic text-[11px] font-semibold">No grade entries recorded.</span>
-                    )}
-                  </div>
-
-                  <div>
-                    <span className="text-[9.5px] font-extrabold text-slate-500 uppercase block mb-2">Fee invoices</span>
-                    {dossier.fees.length > 0 ? (
-                      <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                        {dossier.fees.map((inv) => (
-                          <div key={inv.id} className="flex items-center justify-between bg-white/30 p-2 rounded border border-slate-200/60 text-[11px] font-bold text-slate-700">
-                            <span>Amount: ${inv.amount_paid}</span>
-                            <span className="font-extrabold text-emerald-800 bg-emerald-500/10 px-1.5 py-0.5 border border-emerald-200/40 rounded text-[9.5px]">
-                              {inv.status}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-slate-500 italic text-[11px] font-semibold">No invoices recorded.</span>
-                    )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
-            </div>
-          ) : (
-            <div className="bg-white/40 border border-dashed border-slate-250/80 rounded-2xl p-8 text-center text-slate-500 h-64 flex flex-col items-center justify-center">
-              <Users className="w-10 h-10 text-slate-400 mb-2 stroke-[1.5] animate-bounce" />
-              <h4 className="text-xs font-extrabold text-slate-700">No dossier selected</h4>
-              <p className="text-[10px] text-slate-500 max-w-xs mt-1 font-semibold">
-                Select a student in the roster list to check their academic dossier.
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
 
-      {/* Registration Modal Dialog */}
-      <AnimatePresence>
-        {isRegisterOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsRegisterOpen(false)}
-              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-            />
+              {/* COMMIT BUTTON */}
+              <div className="pt-3 flex items-center justify-between border-t border-[var(--border)]">
+                <span className="text-xs font-medium text-[var(--text-muted)]">
+                  {dryRunResult.validRows > 0
+                    ? `Ready to commit ${dryRunResult.validRows} validated student record(s).`
+                    : 'Fix validation errors to proceed.'}
+                </span>
 
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white/80 backdrop-blur-xl border border-slate-200/80 rounded-2xl shadow-2xl w-full max-w-lg p-6 relative z-10 mx-4 text-slate-800"
-            >
-              <h3 className="text-sm font-extrabold text-slate-900 pb-3 border-b border-slate-200/60 flex items-center gap-2">
-                <Users className="w-4.5 h-4.5 text-indigo-600" />
-                Enroll Student Registry Record
-              </h3>
-
-              <form onSubmit={handleRegisterSubmit} className="space-y-4 mt-4 font-semibold text-xs">
-                {errorMsg && (
-                  <div className="p-3 bg-red-550/10 border border-red-200/40 rounded-xl text-red-800 text-xs flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-red-655 shrink-0" />
-                    <span>{errorMsg}</span>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[9.5px] font-extrabold text-slate-550 uppercase block mb-1.5">First Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                      placeholder="e.g. John"
-                      className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[9.5px] font-extrabold text-slate-550 uppercase block mb-1.5">Last Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={lastName}
-                      onChange={(e) => setLastName(e.target.value)}
-                      placeholder="e.g. Doe"
-                      className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition font-bold"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[9.5px] font-extrabold text-slate-550 uppercase block mb-1.5">Email Address *</label>
-                    <input
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="e.g. j.doe@email.com"
-                      className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[9.5px] font-extrabold text-slate-550 uppercase block mb-1.5">Campus ID *</label>
-                    <input
-                      type="text"
-                      required
-                      value={studentIdInput}
-                      onChange={(e) => setStudentIdInput(e.target.value)}
-                      placeholder="e.g. STU202611"
-                      className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition font-bold"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="text-[9.5px] font-extrabold text-slate-550 uppercase block mb-1.5">Department *</label>
-                    <select
-                      value={deptId}
-                      onChange={(e) => setDeptId(e.target.value)}
-                      className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-indigo-500 transition font-extrabold"
-                    >
-                      {lookupData?.depts.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.code}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[9.5px] font-extrabold text-slate-550 uppercase block mb-1.5">Course *</label>
-                    <select
-                      value={courseId}
-                      onChange={(e) => setCourseId(e.target.value)}
-                      className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-indigo-500 transition font-extrabold"
-                    >
-                      {lookupData?.courses.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.code}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[9.5px] font-extrabold text-slate-550 uppercase block mb-1.5">Semester *</label>
-                    <select
-                      value={semId}
-                      onChange={(e) => setSemId(e.target.value)}
-                      className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-indigo-500 transition font-extrabold"
-                    >
-                      {lookupData?.semesters
-                        .filter((s) => s.course_id === courseId)
-                        .map((s) => (
-                          <option key={s.id} value={s.id}>
-                            Sem {s.number}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[9.5px] font-extrabold text-slate-550 uppercase block mb-1.5">Phone Number</label>
-                    <input
-                      type="text"
-                      value={phoneInput}
-                      onChange={(e) => setPhoneInput(e.target.value)}
-                      placeholder="+1 (555) 012-3456"
-                      className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[9.5px] font-extrabold text-slate-550 uppercase block mb-1.5">Mailing Address</label>
-                    <input
-                      type="text"
-                      value={addressInput}
-                      onChange={(e) => setAddressInput(e.target.value)}
-                      placeholder="e.g. 102 Science St"
-                      className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition font-bold"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end gap-3 pt-3 border-t border-slate-200/60">
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setIsRegisterOpen(false)}
-                    className="text-xs font-extrabold text-slate-500 hover:text-slate-700 transition"
+                    onClick={() => setIsImportOpen(false)}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
                   >
                     Cancel
                   </button>
                   <button
-                    type="submit"
-                    disabled={registerStudentMutation.isPending}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs py-2 px-4 rounded-xl transition disabled:opacity-50"
+                    type="button"
+                    disabled={dryRunResult.validRows === 0 || commitImportMutation.isPending}
+                    onClick={() => commitImportMutation.mutate(dryRunResult.parsedRecords)}
+                    className="px-4 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors disabled:opacity-50 cursor-pointer"
                   >
-                    {registerStudentMutation.isPending ? 'Enrolling...' : 'Confirm Enrollment'}
+                    {commitImportMutation.isPending
+                      ? 'Committing...'
+                      : `Commit Import (${dryRunResult.validRows} Records)`}
                   </button>
                 </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+              </div>
+            </div>
+          )}
+        </div>
+      </Dialog>
     </div>
   );
 }

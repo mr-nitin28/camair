@@ -1,514 +1,488 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
-import { useAppStore } from '@/lib/store';
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  StudentService,
+  type DoubtTicketRecord,
+  type DoubtStatus,
+} from '@/lib/services/student-service';
+import { PageHeader } from '@/components/ui/page-header';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { Dialog } from '@/components/ui/dialog';
+import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
 import {
   HelpCircle,
-  ArrowLeft,
   Plus,
   Send,
   MessageSquare,
-  CheckCircle,
-  XCircle,
-  Sparkles,
-  Loader2,
-  X,
+  Clock,
+  RotateCcw,
+  CheckCircle2,
+  Paperclip,
+  User,
+  AlertTriangle,
+  ArrowLeft,
 } from 'lucide-react';
-import Link from 'next/link';
 
-// Detailed Mock Doubt Tickets and Messages
-const mockSubjects = [
-  { id: 'sub-cd', code: 'CS-601', name: 'Compiler Design' },
-  { id: 'sub-cn', code: 'CS-602', name: 'Computer Networks' },
-  { id: 'sub-se', code: 'CS-603', name: 'Software Engineering' },
-];
+export default function StudentDoubtsPage() {
+  const queryClient = useQueryClient();
+  const [selectedTicketId, setSelectedTicketId] = useState<string | null>('doubt-1');
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isReopenModalOpen, setIsReopenModalOpen] = useState(false);
+  const [replyMessage, setReplyMessage] = useState('');
+  const [reopenReason, setReopenReason] = useState('');
 
-const mockDoubts = [
-  {
-    id: 'd1',
-    title: 'Minimization of DFA containing sink states',
-    description: 'I am trying to minimize the DFA for (a|b)*a(a|b) but get confused about partitioning transitions that lead to dead/sink states.',
-    status: 'Open',
-    category: 'Academic',
-    subject_id: 'sub-cd',
-    created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
-    subjects: mockSubjects[0],
-  },
-  {
-    id: 'd2',
-    title: 'OSPF vs RIP Convergence loops',
-    description: 'Why is OSPF convergence faster than RIP link state protocols? Does OSPF also suffer from the count-to-infinity loop limit?',
-    status: 'Resolved',
-    category: 'Practical',
-    subject_id: 'sub-cn',
-    created_at: new Date(Date.now() - 3600000 * 24 * 2).toISOString(),
-    subjects: mockSubjects[1],
-  },
-];
+  // New Ticket Form State
+  const [newSubjectId, setNewSubjectId] = useState('00000000-0000-0000-0000-000000000351');
+  const [newTitle, setNewTitle] = useState('');
+  const [newQuestion, setNewQuestion] = useState('');
+  const [newAttachment, setNewAttachment] = useState('');
 
-const mockMessages: Record<string, any[]> = {
-  'd1': [
-    {
-      id: 'm1_1',
-      doubt_id: 'd1',
-      sender_name: 'Aarav Sharma',
-      sender_role: 'Student',
-      message: 'Hi Professor, I am trying to minimize the DFA but I am getting confused about how to treat states that transition to dead states. Do we group them together first?',
-      created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
+  const {
+    data: doubts,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ['student-doubts-list'],
+    queryFn: () => StudentService.getDoubts(),
+    staleTime: 30 * 1000,
+  });
+
+  const selectedDoubt = doubts?.find((d) => d.id === selectedTicketId) || doubts?.[0] || null;
+
+  const createMutation = useMutation({
+    mutationFn: (data: { subjectId: string; title: string; question: string; attachmentName?: string }) =>
+      StudentService.createDoubt(data),
+    onSuccess: (newDoubt) => {
+      queryClient.invalidateQueries({ queryKey: ['student-doubts-list'] });
+      setIsCreateModalOpen(false);
+      setNewTitle('');
+      setNewQuestion('');
+      setNewAttachment('');
+      setSelectedTicketId(newDoubt.id);
     },
-    {
-      id: 'm1_2',
-      doubt_id: 'd1',
-      sender_name: 'Dr. Ramesh Kumar',
-      sender_role: 'Advisor',
-      message: 'Hello Aarav, yes, dead/sink states can be combined into a single sink state. Once grouped, write out the state transition table and partition them using partition refinement (P0, P1 etc.). Try that and post your progress.',
-      created_at: new Date(Date.now() - 3600000 * 1.5).toISOString(),
+  });
+
+  const replyMutation = useMutation({
+    mutationFn: ({ doubtId, message }: { doubtId: string; message: string }) =>
+      StudentService.sendDoubtMessage(doubtId, message),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['student-doubts-list'] });
+      setReplyMessage('');
     },
-  ],
-  'd2': [
-    {
-      id: 'm2_1',
-      doubt_id: 'd2',
-      sender_name: 'Aarav Sharma',
-      sender_role: 'Student',
-      message: 'Hi Professor, does OSPF also suffer from RIP count-to-infinity routing loop issues?',
-      created_at: new Date(Date.now() - 3600000 * 24 * 2).toISOString(),
+  });
+
+  const reopenMutation = useMutation({
+    mutationFn: ({ doubtId, message }: { doubtId: string; message: string }) =>
+      StudentService.reopenDoubt(doubtId, message),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['student-doubts-list'] });
+      setIsReopenModalOpen(false);
+      setReopenReason('');
     },
-    {
-      id: 'm2_2',
-      doubt_id: 'd2',
-      sender_name: 'Prof. Ananya Sen',
-      sender_role: 'Advisor',
-      message: 'Hello Aarav, OSPF uses link-state routing based on Dijkstra algorithm. Since each router maintains a complete topological map of the network, loops do not occur and it does not suffer from count-to-infinity.',
-      created_at: new Date(Date.now() - 3600000 * 24 * 1.9).toISOString(),
-    },
-    {
-      id: 'm2_3',
-      doubt_id: 'd2',
-      sender_name: 'Aarav Sharma',
-      sender_role: 'Student',
-      message: 'Excellent, thank you professor. That clears up my query.',
-      created_at: new Date(Date.now() - 3600000 * 24 * 1.8).toISOString(),
-    },
-  ],
-};
-
-export default function DoubtResolutionPage() {
-  const { student } = useAppStore();
-  const [modalOpen, setModalOpen] = useState(false);
-  const [selectedDoubtId, setSelectedDoubtId] = useState<string | null>('d1');
-
-  // New Doubt Form State
-  const [subjectId, setSubjectId] = useState('');
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('Academic');
-  const [formError, setFormError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  // Thread Message State
-  const [replyText, setReplyText] = useState('');
-
-  // Local state to store added doubts and messages in memory
-  const [localDoubts, setLocalDoubts] = useState<any[]>([]);
-  const [localMessages, setLocalMessages] = useState<Record<string, any[]>>({});
-
-  const displaySubjects = mockSubjects;
-
-  const displayDoubts = useMemo(() => {
-    return [...localDoubts, ...mockDoubts];
-  }, [localDoubts]);
-
-  const activeDoubt = useMemo(() => {
-    return displayDoubts.find((d) => d.id === selectedDoubtId);
-  }, [displayDoubts, selectedDoubtId]);
-
-  const displayMessages = useMemo(() => {
-    if (!selectedDoubtId) return [];
-    const local = localMessages[selectedDoubtId] || [];
-    const mock = mockMessages[selectedDoubtId] || [];
-    return [...mock, ...local];
-  }, [selectedDoubtId, localMessages]);
-
-  // Load local doubts & messages on mount
-  React.useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const storedDoubts = localStorage.getItem('local_doubts');
-      if (storedDoubts) {
-        try {
-          setLocalDoubts(JSON.parse(storedDoubts));
-        } catch (e) {
-          console.error(e);
-        }
-      }
-      const storedMessages = localStorage.getItem('local_doubt_messages');
-      if (storedMessages) {
-        try {
-          setLocalMessages(JSON.parse(storedMessages));
-        } catch (e) {
-          console.error(e);
-        }
-      }
-    }
-  }, []);
-
-  const handleCreateDoubt = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title || !description) {
-      setFormError('Please fill in both title and description.');
-      return;
-    }
-    setFormError(null);
-    setSubmitting(true);
-
-    setTimeout(() => {
-      const selectedSub = displaySubjects.find((s) => s.id === subjectId) || displaySubjects[0];
-      const newDoubt = {
-        id: `local-doubt-${Date.now()}`,
-        title,
-        description,
-        status: 'Open',
-        category,
-        subject_id: subjectId,
-        created_at: new Date().toISOString(),
-        subjects: selectedSub,
-      };
-
-      setLocalDoubts((prev) => {
-        const updated = [newDoubt, ...prev];
-        localStorage.setItem('local_doubts', JSON.stringify(updated));
-        return updated;
-      });
-      setTitle('');
-      setDescription('');
-      setSubjectId('');
-      setCategory('Academic');
-      setModalOpen(false);
-      setSubmitting(false);
-      setSelectedDoubtId(newDoubt.id);
-    }, 700);
-  };
+  });
 
   const handleSendReply = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!replyText.trim() || !selectedDoubtId) return;
-
-    const newMsg = {
-      id: `local-msg-${Date.now()}`,
-      doubt_id: selectedDoubtId,
-      sender_name: 'Aarav Sharma',
-      sender_role: 'Student',
-      message: replyText,
-      created_at: new Date().toISOString(),
-    };
-
-    setLocalMessages((prev) => {
-      const updatedMessages = [...(prev[selectedDoubtId] || []), newMsg];
-      const updated = {
-        ...prev,
-        [selectedDoubtId]: updatedMessages,
-      };
-      localStorage.setItem('local_doubt_messages', JSON.stringify(updated));
-      return updated;
-    });
-
-    setReplyText('');
-
-    // Simulate Advisor Reply
-    setTimeout(() => {
-      const advisorMsg = {
-        id: `local-advisor-${Date.now()}`,
-        doubt_id: selectedDoubtId,
-        sender_name: activeDoubt?.subjects?.faculty_name || 'Dr. Ramesh Kumar',
-        sender_role: 'Advisor',
-        message: `Got it! I will inspect this detail. Let's trace this code compile pattern tomorrow in lecture.`,
-        created_at: new Date().toISOString(),
-      };
-      setLocalMessages((prev) => {
-        const updatedMessages = [...(prev[selectedDoubtId] || []), advisorMsg];
-        const updated = {
-          ...prev,
-          [selectedDoubtId]: updatedMessages,
-        };
-        localStorage.setItem('local_doubt_messages', JSON.stringify(updated));
-        return updated;
-      });
-    }, 1500);
+    if (!replyMessage.trim() || !selectedDoubt) return;
+    replyMutation.mutate({ doubtId: selectedDoubt.id, message: replyMessage });
   };
 
-  return (
-    <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <Link href="/dashboard" className="text-xs text-slate-500 hover:text-indigo-600 font-semibold flex items-center gap-1 mb-2">
-            <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
-          </Link>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Doubt Resolution Box</h2>
-          <p className="text-slate-600 text-xs mt-1">Submit academic or exam queries to course advisors and track conversation threads.</p>
-        </div>
-        <button
-          onClick={() => setModalOpen(true)}
-          className="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white px-4 py-2.5 text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow shadow-indigo-600/10 shrink-0 self-start sm:self-auto"
-        >
-          <Plus className="w-4.5 h-4.5" /> Ask a Question
-        </button>
-      </div>
+  const handleCreateSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTitle.trim() || !newQuestion.trim()) return;
+    createMutation.mutate({
+      subjectId: newSubjectId,
+      title: newTitle,
+      question: newQuestion,
+      attachmentName: newAttachment || undefined,
+    });
+  };
 
-      {/* Grid: Tickets List & Live Chat Thread */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Doubts Tickets list */}
-        <div className="lg:col-span-1 space-y-4">
-          <h3 className="text-sm font-bold text-slate-800">Your Doubt Tickets</h3>
-          {displayDoubts.length === 0 ? (
-            <div className="text-center py-12 bg-white border border-slate-200 rounded-3xl shadow-sm">
-              <HelpCircle className="w-9 h-9 text-slate-400 mx-auto mb-3" />
-              <p className="text-xs font-bold text-slate-700">No doubts raised yet</p>
-              <p className="text-[10px] text-slate-500 mt-1">Submit a question using the button above.</p>
-            </div>
+  const handleReopenSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reopenReason.trim() || !selectedDoubt) return;
+    reopenMutation.mutate({ doubtId: selectedDoubt.id, message: reopenReason });
+  };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6" data-testid="student-doubts-loading">
+        <Skeleton className="h-16 w-full rounded-2xl" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 h-[500px]">
+          <Skeleton className="h-full rounded-2xl" />
+          <Skeleton className="h-full rounded-2xl md:col-span-2" />
+        </div>
+      </div>
+    );
+  }
+
+  if (isError || !doubts) {
+    return (
+      <div className="py-12">
+        <ErrorState
+          title="Could not load doubts"
+          message={error instanceof Error ? error.message : 'Failed to retrieve academic doubt tickets.'}
+          onRetry={() => refetch()}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6" data-testid="student-doubts">
+      {/* Header */}
+      <PageHeader
+        title="Doubt Resolution & Direct Inquiries"
+        description="Threaded academic questions routed directly to designated course instructors"
+        badge={<StatusBadge label="Institutional Reopen Limit: 2" variant="info" size="sm" />}
+        actions={
+          <button
+            type="button"
+            onClick={() => setIsCreateModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-[var(--accent)] hover:opacity-90 text-[var(--accent-fg)] transition shadow-sm cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Post New Doubt</span>
+          </button>
+        }
+      />
+
+      {/* Main Split-Pane Workspace */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 min-h-[560px]">
+        {/* Left Column: Tickets List */}
+        <div className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm space-y-3 flex flex-col">
+          <div className="flex items-center justify-between pb-2 border-b border-[var(--border)]">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">
+              Your Doubt Threads ({doubts.length})
+            </h3>
+          </div>
+
+          {doubts.length === 0 ? (
+            <EmptyState
+              icon={HelpCircle}
+              title="No doubts recorded"
+              description="Have questions regarding assignments or lectures? Post your first doubt."
+              className="py-10 border-none"
+            />
           ) : (
-            <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
-              {displayDoubts.map((doubt: any) => {
-                const isSelected = selectedDoubtId === doubt.id;
+            <div className="space-y-2 overflow-y-auto custom-scrollbar flex-1">
+              {doubts.map((d) => {
+                const isSelected = selectedDoubt?.id === d.id;
+                let statusVariant: 'success' | 'warning' | 'info' | 'neutral' = 'neutral';
+                if (d.status === 'open') statusVariant = 'warning';
+                else if (d.status === 'answered') statusVariant = 'info';
+                else if (d.status === 'resolved') statusVariant = 'success';
+                else if (d.status === 'reopened') statusVariant = 'warning';
+
                 return (
-                  <div
-                    key={doubt.id}
-                    onClick={() => setSelectedDoubtId(doubt.id)}
-                    className={`p-4 rounded-2xl border transition-all cursor-pointer text-left ${
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => setSelectedTicketId(d.id)}
+                    className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer ${
                       isSelected
-                        ? 'border-indigo-400 bg-white ring-1 ring-indigo-500/10 shadow-sm shadow-indigo-600/5 animate-fadeIn'
-                        : 'border-slate-200 bg-white hover:border-slate-300'
+                        ? 'border-[var(--accent)] bg-[var(--accent-soft)]/20 shadow-sm'
+                        : 'border-[var(--border)] bg-[var(--surface-2)]/30 hover:bg-[var(--surface-2)]'
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-2 font-mono text-[9px] font-extrabold">
-                      <span className="uppercase px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-md">
-                        {doubt.category}
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className="font-mono text-[10px] font-extrabold text-[var(--accent)]">
+                        {d.subjectCode}
                       </span>
-                      <span
-                        className={`uppercase px-2 py-0.5 border rounded-full ${
-                          doubt.status === 'Resolved'
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                            : 'bg-amber-50 text-amber-700 border-amber-100'
-                        }`}
-                      >
-                        {doubt.status}
-                      </span>
+                      <StatusBadge
+                        label={d.status.toUpperCase()}
+                        variant={statusVariant}
+                        size="sm"
+                      />
                     </div>
-                    <h4 className="text-xs font-bold text-slate-900 mt-2.5 line-clamp-1">{doubt.title}</h4>
-                    <p className="text-[10px] text-slate-500 mt-0.5 font-bold line-clamp-1">{doubt.subjects?.name || 'General'}</p>
-                    <span className="text-[8.5px] text-slate-500 block mt-2 font-mono font-bold">
-                      {new Date(doubt.created_at).toLocaleDateString()}
-                    </span>
-                  </div>
+                    <h4 className="text-xs font-bold text-[var(--text)] line-clamp-1 leading-snug">
+                      {d.title}
+                    </h4>
+                    <p className="text-[11px] text-[var(--text-muted)] mt-1 line-clamp-1">
+                      {d.initialQuestion}
+                    </p>
+                    <div className="mt-2 flex items-center justify-between text-[10px] text-[var(--text-muted)] font-mono">
+                      <span>{d.messages.length} messages</span>
+                      <span>{new Date(d.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+                    </div>
+                  </button>
                 );
               })}
             </div>
           )}
         </div>
 
-        {/* Dynamic Conversation Thread Section */}
-        <div className="lg:col-span-2 bg-white border border-slate-200 rounded-3xl shadow-sm flex flex-col h-[75vh]">
-          {selectedDoubtId && activeDoubt ? (
+        {/* Right Column: Active Thread View */}
+        <div className="lg:col-span-2 p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm flex flex-col justify-between">
+          {selectedDoubt ? (
             <>
               {/* Thread Header */}
-              <div className="p-4 border-b border-slate-200 flex items-center justify-between shrink-0">
-                <div>
-                  <h3 className="text-xs font-extrabold text-slate-900">{activeDoubt.title}</h3>
-                  <span className="text-[9.5px] text-slate-500 font-bold">
-                    {activeDoubt.subjects?.name || 'General Query'} • {activeDoubt.category}
-                  </span>
+              <div className="pb-4 border-b border-[var(--border)] space-y-2">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs font-extrabold px-2.5 py-0.5 rounded-lg bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/20">
+                      {selectedDoubt.subjectCode}
+                    </span>
+                    <span className="text-xs text-[var(--text-muted)]">
+                      {selectedDoubt.subjectName} • {selectedDoubt.facultyName}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <StatusBadge
+                      label={selectedDoubt.status.toUpperCase()}
+                      variant={
+                        selectedDoubt.status === 'resolved'
+                          ? 'success'
+                          : selectedDoubt.status === 'answered'
+                          ? 'info'
+                          : 'warning'
+                      }
+                      size="sm"
+                    />
+
+                    {/* Reopen Action Button under Policy Rules */}
+                    {selectedDoubt.status === 'resolved' && (
+                      selectedDoubt.reopenCount < selectedDoubt.maxReopensAllowed ? (
+                        <button
+                          type="button"
+                          onClick={() => setIsReopenModalOpen(true)}
+                          className="px-2.5 py-1 text-[11px] font-bold rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-[var(--accent)] hover:opacity-80 transition cursor-pointer inline-flex items-center gap-1"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Reopen ({selectedDoubt.maxReopensAllowed - selectedDoubt.reopenCount} left)</span>
+                        </button>
+                      ) : (
+                        <span className="text-[10px] text-[var(--text-muted)] font-mono px-2 py-0.5 rounded bg-[var(--surface-2)]">
+                          Max Reopens Reached
+                        </span>
+                      )
+                    )}
+                  </div>
                 </div>
-                <button
-                  onClick={() => setSelectedDoubtId(null)}
-                  className="lg:hidden p-1 text-slate-500 hover:text-slate-700 rounded-lg hover:bg-slate-100"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                </button>
+
+                <h3 className="text-sm font-bold text-[var(--text)]">
+                  {selectedDoubt.title}
+                </h3>
               </div>
 
-              {/* Chat Messages */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {/* Doubt description first */}
-                <div className="bg-slate-50 border border-slate-200/60 p-4.5 rounded-2xl space-y-2">
-                  <span className="text-[8.5px] font-bold text-slate-500 uppercase tracking-widest font-mono">Issue Description</span>
-                  <p className="text-slate-700 text-xs leading-relaxed font-semibold">{activeDoubt.description}</p>
-                </div>
-
-                <div className="flex items-center justify-center gap-1.5 py-2 text-[9.5px] text-slate-500 uppercase tracking-widest font-mono font-bold">
-                  <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Discussion Stream</span>
-                </div>
-
-                {displayMessages.map((msg: any) => {
-                  const isAdvisor = msg.sender_role === 'Advisor' || msg.sender_role === 'Faculty';
+              {/* Message History Roster */}
+              <div className="my-4 flex-1 overflow-y-auto space-y-3.5 custom-scrollbar max-h-[380px] pr-2">
+                {selectedDoubt.messages.map((m) => {
+                  const isStudent = m.senderRole === 'Student';
                   return (
                     <div
-                      key={msg.id}
-                      className={`flex flex-col max-w-[80%] ${isAdvisor ? 'mr-auto items-start animate-fadeIn' : 'ml-auto items-end animate-fadeIn'}`}
+                      key={m.id}
+                      className={`flex flex-col ${isStudent ? 'items-end' : 'items-start'}`}
                     >
-                      <div className="flex items-baseline gap-2 mb-1">
-                        <span className="text-[9.5px] text-slate-500 font-bold">{msg.sender_name}</span>
-                        <span className="text-[8px] text-slate-500 font-mono font-bold px-1.5 bg-slate-100 rounded">
-                          {msg.sender_role}
+                      <div className="flex items-center gap-1.5 mb-1 text-[10px] text-[var(--text-muted)] font-semibold">
+                        <span>{m.senderName}</span>
+                        <span>•</span>
+                        <span className="font-mono">{m.senderRole}</span>
+                        <span>•</span>
+                        <span className="font-mono">
+                          {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
                       <div
-                        className={`p-3 rounded-2xl text-xs font-semibold leading-relaxed ${
-                          isAdvisor
-                            ? 'bg-white text-slate-800 border border-slate-205 rounded-tl-none shadow-sm'
-                            : 'bg-indigo-600 text-white rounded-tr-none'
+                        className={`p-3.5 rounded-2xl max-w-lg text-xs leading-relaxed ${
+                          isStudent
+                            ? 'bg-[var(--accent)] text-[var(--accent-fg)] rounded-tr-none shadow-sm'
+                            : 'bg-[var(--surface-2)] text-[var(--text)] rounded-tl-none border border-[var(--border)]'
                         }`}
                       >
-                        {msg.message}
+                        <p>{m.message}</p>
+                        {m.attachmentName && (
+                          <div className="mt-2 pt-2 border-t border-white/20 flex items-center gap-1.5 text-[10px] font-mono">
+                            <Paperclip className="w-3 h-3" />
+                            <span>Attachment: {m.attachmentName}</span>
+                          </div>
+                        )}
                       </div>
-                      <span className="text-[8px] text-slate-400 mt-1 font-mono font-bold">
-                        {new Date(msg.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                      </span>
                     </div>
                   );
                 })}
               </div>
 
-              {/* Chat Input Footer */}
-              <form onSubmit={handleSendReply} className="p-4 border-t border-slate-200 shrink-0 flex gap-2">
+              {/* Reply Form */}
+              <form onSubmit={handleSendReply} className="pt-3 border-t border-[var(--border)] flex items-center gap-2">
                 <input
                   type="text"
-                  placeholder={activeDoubt.status === 'Resolved' ? 'This doubt is resolved.' : 'Type your message/reply...'}
-                  disabled={activeDoubt.status === 'Resolved'}
-                  value={replyText}
-                  onChange={(e) => setReplyText(e.target.value)}
-                  className="flex-grow bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-indigo-500 text-slate-800 placeholder-slate-400 font-semibold shadow-sm"
+                  placeholder={
+                    selectedDoubt.status === 'resolved'
+                      ? 'Ticket is marked resolved. Reopen to post more queries.'
+                      : 'Type your message or follow-up question...'
+                  }
+                  disabled={selectedDoubt.status === 'resolved'}
+                  value={replyMessage}
+                  onChange={(e) => setReplyMessage(e.target.value)}
+                  className="flex-1 text-xs py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:opacity-50"
                 />
                 <button
                   type="submit"
-                  disabled={activeDoubt.status === 'Resolved'}
-                  className="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white p-2.5 rounded-xl transition disabled:opacity-50"
+                  disabled={!replyMessage.trim() || selectedDoubt.status === 'resolved' || replyMutation.isPending}
+                  className="px-4 py-2 text-xs font-bold rounded-xl bg-[var(--accent)] text-[var(--accent-fg)] hover:opacity-90 disabled:opacity-40 transition cursor-pointer inline-flex items-center gap-1.5 shrink-0"
                 >
-                  <Send className="w-4 h-4 text-white" />
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Send</span>
                 </button>
               </form>
             </>
           ) : (
-            <div className="h-full flex flex-col items-center justify-center text-center p-6">
-              <MessageSquare className="w-12 h-12 text-slate-400 mb-3 animate-pulse" />
-              <p className="text-xs font-bold text-slate-700">No conversation selected</p>
-              <p className="text-[10px] text-slate-500 mt-1 font-semibold">Select a ticket from the left panel to inspect messages.</p>
-            </div>
+            <EmptyState
+              icon={MessageSquare}
+              title="Select a thread"
+              description="Choose an existing doubt ticket from the left panel or submit a new inquiry."
+              className="py-20 border-none"
+            />
           )}
         </div>
-
       </div>
 
-      {/* New Question Modal */}
-      {modalOpen && (
-        <div className="fixed inset-0 bg-slate-900/65 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col animate-scaleUp">
-            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-indigo-650" />
-                <h3 className="font-extrabold text-sm text-slate-900">Ask a Question</h3>
-              </div>
-              <button
-                onClick={() => setModalOpen(false)}
-                className="p-1.5 text-slate-450 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateDoubt} className="p-6 space-y-4 font-semibold text-xs text-slate-700">
-              {formError && (
-                <div className="bg-rose-50 border border-rose-100 text-rose-700 text-xs rounded-xl p-3 flex items-center gap-2">
-                  <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                  <span>{formError}</span>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[9.5px] font-extrabold text-slate-500 uppercase tracking-wider mb-1 font-mono">
-                    Category *
-                  </label>
-                  <select
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    className="w-full bg-white border border-slate-200 text-slate-800 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-indigo-500/40 transition cursor-pointer font-bold shadow-sm"
-                  >
-                    <option value="Academic">Academic</option>
-                    <option value="Practical">Practical</option>
-                    <option value="Administrative">Administrative</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[9.5px] font-extrabold text-slate-500 uppercase tracking-wider mb-1 font-mono">
-                    Related Subject *
-                  </label>
-                  <select
-                    value={subjectId}
-                    onChange={(e) => setSubjectId(e.target.value)}
-                    className="w-full bg-white border border-slate-200 text-slate-800 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-indigo-500/40 transition cursor-pointer font-bold shadow-sm"
-                  >
-                    <option value="">General Query</option>
-                    {displaySubjects.map((sub: any) => (
-                      <option key={sub.id} value={sub.id}>
-                        {sub.name} ({sub.code})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[9.5px] font-extrabold text-slate-500 uppercase tracking-wider mb-1 font-mono">
-                  Question Headline / Title *
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. State minimization table in Compiler Design"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="w-full bg-white border border-slate-200 text-slate-800 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-indigo-500/40 transition"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[9.5px] font-extrabold text-slate-500 uppercase tracking-wider mb-1 font-mono">
-                  Detailed Query Description *
-                </label>
-                <textarea
-                  rows={4}
-                  placeholder="Elaborate your query or question code context..."
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="w-full bg-white border border-slate-200 text-slate-800 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-indigo-500/40 transition"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setModalOpen(false)}
-                  className="border border-slate-200 hover:bg-slate-50 text-slate-600 px-4 py-2 text-xs font-bold rounded-xl transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white px-4 py-2 text-xs font-bold rounded-xl transition shadow shadow-indigo-600/10 flex items-center justify-center gap-1.5"
-                >
-                  {submitting ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    'Submit Ticket'
-                  )}
-                </button>
-              </div>
-            </form>
+      {/* Create Doubt Modal */}
+      <Dialog
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        title="Post Academic Doubt"
+        description="Your question will be dispatched to the primary faculty member teaching the subject"
+        maxWidth="md"
+      >
+        <form onSubmit={handleCreateSubmit} className="space-y-4 p-1">
+          <div>
+            <label className="text-xs font-bold text-[var(--text)] block mb-1">
+              Select Subject <span className="text-rose-500">*</span>
+            </label>
+            <select
+              value={newSubjectId}
+              onChange={(e) => setNewSubjectId(e.target.value)}
+              className="w-full text-xs py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] font-semibold"
+            >
+              <option value="00000000-0000-0000-0000-000000000351">CS601 - Compiler Design (Prof. Vikram Mehta)</option>
+              <option value="00000000-0000-0000-0000-000000000352">CS602 - Computer Networks (Prof. Ananya Deshmukh)</option>
+              <option value="00000000-0000-0000-0000-000000000353">CS603 - Artificial Intelligence (Dr. Vikrant Roy)</option>
+              <option value="sub-604">CS604 - Software Architecture (Prof. Shruti Sen)</option>
+              <option value="sub-605L">CS605L - Compiler Design Lab (Prof. Vikram Mehta)</option>
+            </select>
           </div>
-        </div>
-      )}
+
+          <div>
+            <label className="text-xs font-bold text-[var(--text)] block mb-1">
+              Topic / Inquiry Title <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="e.g. Question on LR(1) parser canonical items"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              className="w-full text-xs py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] font-semibold"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-[var(--text)] block mb-1">
+              Detailed Question Body <span className="text-rose-500">*</span>
+            </label>
+            <textarea
+              rows={4}
+              required
+              placeholder="Describe your doubt in detail including specific code lines, textbook theorem, or lab step..."
+              value={newQuestion}
+              onChange={(e) => setNewQuestion(e.target.value)}
+              className="w-full text-xs p-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] resize-none"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-[var(--text)] block mb-1">
+              Attachment Name (Optional code snippet or image)
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. grammar_ast_derivation.png"
+              value={newAttachment}
+              onChange={(e) => setNewAttachment(e.target.value)}
+              className="w-full text-xs py-2 px-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] font-mono"
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-[var(--border)]">
+            <button
+              type="button"
+              onClick={() => setIsCreateModalOpen(false)}
+              className="px-4 py-2 rounded-xl text-xs font-bold border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)] cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={createMutation.isPending}
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-[var(--accent)] text-[var(--accent-fg)] hover:opacity-90 cursor-pointer"
+            >
+              {createMutation.isPending ? 'Posting Inquiry...' : 'Submit Inquiry'}
+            </button>
+          </div>
+        </form>
+      </Dialog>
+
+      {/* Reopen Doubt Modal */}
+      <Dialog
+        isOpen={isReopenModalOpen}
+        onClose={() => setIsReopenModalOpen(false)}
+        title="Reopen Doubt Ticket"
+        description="Provide additional clarification to reopen this resolved inquiry"
+        maxWidth="sm"
+      >
+        <form onSubmit={handleReopenSubmit} className="space-y-4 p-1">
+          <p className="text-xs text-[var(--text-muted)]">
+            Institutional policy allows up to 2 reopens per ticket. This ticket has been reopened{' '}
+            {selectedDoubt?.reopenCount} time(s).
+          </p>
+
+          {reopenMutation.isError && (
+            <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs font-semibold">
+              {reopenMutation.error instanceof Error ? reopenMutation.error.message : 'Failed to reopen ticket'}
+            </div>
+          )}
+
+          <div>
+            <label className="text-xs font-bold text-[var(--text)] block mb-1">
+              Reason for Reopening <span className="text-rose-500">*</span>
+            </label>
+            <textarea
+              rows={3}
+              required
+              placeholder="Explain why further clarification is needed..."
+              value={reopenReason}
+              onChange={(e) => setReopenReason(e.target.value)}
+              className="w-full text-xs p-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] resize-none"
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-[var(--border)]">
+            <button
+              type="button"
+              onClick={() => setIsReopenModalOpen(false)}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={reopenMutation.isPending}
+              className="px-4 py-2 rounded-xl text-xs font-bold bg-[var(--accent)] text-[var(--accent-fg)]"
+            >
+              {reopenMutation.isPending ? 'Reopening...' : 'Confirm Reopen'}
+            </button>
+          </div>
+        </form>
+      </Dialog>
     </div>
   );
 }

@@ -1,486 +1,685 @@
 'use client';
 
-import React, { useMemo, useState, useEffect } from 'react';
-import { useAppStore } from '@/lib/store';
+import React from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
-  Award,
-  Calendar,
-  CreditCard,
-  Megaphone,
-  PlusCircle,
-  HelpCircle,
-  FileDown,
-  ArrowRight,
+  StudentService,
+  type StudentDashboardSummary,
+} from '@/lib/services/student-service';
+import { ProgressRing } from '@/components/ui/progress-ring';
+import { StatCard } from '@/components/ui/stat-card';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { PageHeader } from '@/components/ui/page-header';
+import {
+  CalendarCheck,
   TrendingUp,
-  Percent,
-  AlertCircle,
-  Clock,
-  Sparkles,
+  CreditCard,
+  Award,
   BookOpen,
-  CheckCircle,
+  CalendarDays,
+  HelpCircle,
+  Megaphone,
+  ArrowRight,
+  Clock,
+  MapPin,
+  AlertTriangle,
+  CheckCircle2,
+  Bell,
+  Sparkles,
+  ChevronRight,
+  FileText,
 } from 'lucide-react';
 import Link from 'next/link';
 
-// Detailed Mock Data Fallbacks for empty database query states
-const mockAttendance = [
-  { status: 'Present' }, { status: 'Present' }, { status: 'Absent' }, { status: 'Present' },
-  { status: 'Present' }, { status: 'Present' }, { status: 'Present' }, { status: 'Late' },
-  { status: 'Present' }, { status: 'Present' }, { status: 'Present' }, { status: 'Present' },
-  { status: 'Absent' }, { status: 'Present' }, { status: 'Present' }, { status: 'Present' },
-  { status: 'Present' }, { status: 'Late' }, { status: 'Present' }, { status: 'Present' },
-];
+function SgpaSparkline({ trend }: { trend: { semester: string; sgpa: number; cgpa: number }[] }) {
+  if (!trend || trend.length === 0) return null;
+  const width = 170;
+  const height = 40;
+  const padding = 6;
+  const minVal = Math.min(...trend.map((t) => t.sgpa)) - 0.2;
+  const maxVal = Math.max(...trend.map((t) => t.sgpa)) + 0.2;
+  const range = maxVal - minVal || 1;
 
-const mockFees = [
-  {
-    id: 'f1',
-    tuition_fee: 65000,
-    exam_fee: 5000,
-    library_fee: 2500,
-    other_fee: 3500,
-    due_date: '2026-07-10',
-    payments: [
-      { id: 'p1', amount_paid: 65000, status: 'Success' },
-      { id: 'p2', amount_paid: 5000, status: 'Success' },
-    ],
-  },
-  {
-    id: 'f2',
-    tuition_fee: 75000,
-    exam_fee: 5000,
-    library_fee: 2500,
-    other_fee: 4500,
-    due_date: '2026-06-30',
-    payments: [
-      { id: 'p3', amount_paid: 50000, status: 'Success' },
-    ],
-  },
-];
+  const points = trend.map((pt, idx) => {
+    const x = padding + (idx / (trend.length - 1)) * (width - 2 * padding);
+    const y = height - padding - ((pt.sgpa - minVal) / range) * (height - 2 * padding);
+    return { x, y, pt };
+  });
 
-const mockAnnouncements = [
-  {
-    id: 'a1',
-    title: 'Mid-Semester Internal Evaluation Schedule',
-    content: 'The detailed datesheet for Semester 6 Mid-Term internal examinations is now uploaded. Attendance is strictly compulsory. Contact your department coordinator for details.',
-    priority: 'Critical',
-    category: 'Examinations',
-    created_at: new Date(Date.now() - 3600000 * 4).toISOString(),
-  },
-  {
-    id: 'a2',
-    title: 'Annual Campus Hackathon - Hackfest 2026',
-    content: 'Registration is now open for Hackfest 2026. Cash prizes worth ₹2,50,000 up for grabs. Mentorship from senior engineering staff. Registrations close on June 28th.',
-    priority: 'High',
-    category: 'Activities',
-    created_at: new Date(Date.now() - 3600000 * 20).toISOString(),
-  },
-  {
-    id: 'a3',
-    title: 'Fee Payment Deadline Extension',
-    content: 'The deadline for clearing Semester 6 academic fee dues has been extended till June 30th without any late penalty charges. Please check your ledger for pending invoices.',
-    priority: 'Normal',
-    category: 'Administration',
-    created_at: new Date(Date.now() - 3600000 * 48).toISOString(),
-  },
-];
-
-const mockActivities = [
-  {
-    id: 'ac1',
-    title: 'Advanced React & Next.js Workshop',
-    venue: 'Seminar Hall 3',
-    start_date: new Date(Date.now() + 3600000 * 28).toISOString(),
-    image_url: null,
-  },
-  {
-    id: 'ac2',
-    title: 'Web3 & Decentralized Ledger Boot Camp',
-    venue: 'Block B Lab 6',
-    start_date: new Date(Date.now() + 3600000 * 72).toISOString(),
-    image_url: null,
-  },
-  {
-    id: 'ac3',
-    title: 'Campus Placement & Aptitude Prep',
-    venue: 'Main Auditorium',
-    start_date: new Date(Date.now() + 3600000 * 120).toISOString(),
-    image_url: null,
-  },
-];
-
-export default function StudentDashboard() {
-  const { student } = useAppStore();
-  const [localPayments, setLocalPayments] = useState<Record<string, any[]>>({});
-
-  useEffect(() => {
-    const saved = localStorage.getItem('local_fee_payments');
-    if (saved) {
-      try {
-        setLocalPayments(JSON.parse(saved));
-      } catch (e) {
-        console.error('Failed to parse local payments:', e);
-      }
-    }
-  }, []);
-
-  const displayAttendance = mockAttendance;
-
-  const displayFees = useMemo(() => {
-    return mockFees.map((fee: any) => {
-      const extra = localPayments[fee.id] || [];
-      return {
-        ...fee,
-        payments: [...(fee.payments || []), ...extra],
-      };
-    });
-  }, [localPayments]);
-
-  const displayAnnouncements = mockAnnouncements;
-  const displayActivities = mockActivities;
-
-  // Calculate Attendance Percentage
-  const attendancePercentage = useMemo(() => {
-    const present = displayAttendance.filter((a) => a.status === 'Present' || a.status === 'Late').length;
-    return Math.round((present / displayAttendance.length) * 100);
-  }, [displayAttendance]);
-
-  // Calculate Fees Status with correct numeric conversion to prevent string concatenation bugs
-  const feesSummary = useMemo(() => {
-    let paid = 0;
-    let pending = 0;
-    let nextDue: string | null = null;
-
-    displayFees.forEach((fee: any) => {
-      const tuition = Number(fee.tuition_fee) || 0;
-      const exam = Number(fee.exam_fee) || 0;
-      const library = Number(fee.library_fee) || 0;
-      const other = Number(fee.other_fee) || 0;
-      const totalFee = tuition + exam + library + other;
-
-      const paymentsSum = fee.payments
-        ?.filter((p: any) => p.status === 'Success')
-        .reduce((sum: number, p: any) => sum + (Number(p.amount_paid) || 0), 0) || 0;
-
-      paid += paymentsSum;
-      const diff = totalFee - paymentsSum;
-      if (diff > 0) {
-        pending += diff;
-        if (!nextDue || new Date(fee.due_date) < new Date(nextDue)) {
-          nextDue = fee.due_date;
-        }
-      }
-    });
-
-    return { paid, pending, nextDue };
-  }, [displayFees]);
-
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.05,
-      },
-    },
-  };
-
-  const itemVariants = {
-    hidden: { opacity: 0, y: 15 },
-    show: { opacity: 1, y: 0, transition: { type: 'spring' as const, stiffness: 260, damping: 25 } },
-  };
+  const polylineStr = points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  const areaPathStr = `M ${points[0].x},${height} L ${polylineStr} L ${points[points.length - 1].x},${height} Z`;
 
   return (
-    <motion.div
-      variants={containerVariants}
-      initial="hidden"
-      animate="show"
-      className="space-y-6 bg-transparent"
-    >
-      {/* 1. HERO SECTION (Welcome Banner with subtle gradients) */}
-      <motion.div
-        variants={itemVariants}
-        className="relative bg-gradient-to-r from-indigo-900 via-indigo-955 to-purple-950 p-6 md:p-8 rounded-3xl text-white overflow-hidden border border-indigo-500/20 shadow-md"
-      >
-        <div className="absolute inset-0 bg-grid-white/[0.02] pointer-events-none" />
-        <div className="absolute top-[-50%] right-[-10%] w-[50%] h-[200%] bg-indigo-500/10 blur-[100px] rounded-full pointer-events-none" />
-        
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+    <div className="mt-3 pt-2.5 border-t border-[var(--border)]/60">
+      <div className="flex items-center justify-between text-[10px] text-[var(--text-muted)] font-mono mb-1.5">
+        <span className="font-bold">SGPA Trajectory</span>
+        <span className="text-purple-600 dark:text-purple-400 font-bold">Sem 1 → Sem 5</span>
+      </div>
+      <svg width={width} height={height} className="w-full overflow-visible">
+        <defs>
+          <linearGradient id="sparklineArea" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.3" />
+            <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.0" />
+          </linearGradient>
+        </defs>
+        <path d={areaPathStr} fill="url(#sparklineArea)" />
+        <polyline
+          fill="none"
+          stroke="#8b5cf6"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          points={polylineStr}
+        />
+        {points.map((p, i) => (
+          <circle
+            key={i}
+            cx={p.x}
+            cy={p.y}
+            r={i === points.length - 1 ? 4 : 2.5}
+            className={
+              i === points.length - 1
+                ? 'fill-purple-600 stroke-white dark:stroke-slate-900 stroke-2'
+                : 'fill-purple-400'
+            }
+          />
+        ))}
+      </svg>
+      <div className="flex justify-between items-center text-[9px] font-mono text-[var(--text-muted)] mt-1">
+        <span>Sem 1: {trend[0].sgpa.toFixed(1)}</span>
+        <span className="font-extrabold text-purple-600 dark:text-purple-400">
+          Sem 5: {trend[trend.length - 1].sgpa.toFixed(2)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+export default function StudentDashboardPage() {
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery<StudentDashboardSummary>({
+    queryKey: ['student-dashboard-overview'],
+    queryFn: () => StudentService.getDashboardSummary(),
+    staleTime: 60 * 1000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6" data-testid="student-dashboard-loading">
+        {/* Header Skeleton */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/10 backdrop-blur-md rounded-full text-xs font-semibold text-indigo-200">
-              <Sparkles className="w-3.5 h-3.5" /> Welcome back, Scholar
-            </span>
-            <h1 className="text-2xl md:text-3xl font-bold tracking-tight">
-              Aarav Sharma
-            </h1>
-            <p className="text-indigo-200 text-xs md:text-sm font-semibold max-w-xl">
-              You are currently registered in Semester 6 of Computer Science & Engineering. Let's inspect your real-time academic progression reports.
-            </p>
+            <Skeleton className="h-8 w-64" />
+            <Skeleton className="h-4 w-96" />
+          </div>
+          <div className="flex gap-2">
+            <Skeleton className="h-9 w-28 rounded-xl" />
+            <Skeleton className="h-9 w-28 rounded-xl" />
+          </div>
+        </div>
+
+        {/* Today Strip Skeleton */}
+        <Skeleton className="h-24 w-full rounded-2xl" />
+
+        {/* Key Metrics Grid Skeleton */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Skeleton className="h-32 rounded-2xl" />
+          <Skeleton className="h-32 rounded-2xl" />
+          <Skeleton className="h-32 rounded-2xl" />
+          <Skeleton className="h-32 rounded-2xl" />
+        </div>
+
+        {/* Attendance Ring and Subjects */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <Skeleton className="h-64 rounded-2xl lg:col-span-2" />
+          <Skeleton className="h-64 rounded-2xl" />
+        </div>
+      </div>
+    );
+  }
+
+  if (isError || !data) {
+    return (
+      <div className="py-12">
+        <ErrorState
+          title="Could not load student dashboard"
+          message={error instanceof Error ? error.message : 'Failed to retrieve authoritative student records.'}
+          onRetry={() => refetch()}
+        />
+      </div>
+    );
+  }
+
+  const {
+    student,
+    todayStrip,
+    attendanceSummary,
+    academicSummary,
+    feeSummary,
+    upcomingExams,
+    recentAnnouncements,
+    pendingRequestsCount,
+  } = data;
+
+  const overall = attendanceSummary.overall;
+
+  return (
+    <div className="space-y-6" data-testid="student-dashboard">
+      {/* 1. Greeting & Page Header */}
+      <PageHeader
+        title={`Welcome back, ${student.name.split(' ')[0]} 👋`}
+        description={`${student.program} • ${student.section} • Roll No: ${student.enrollmentNo}`}
+        badge={<StatusBadge label="Academic Session 2025-2026" variant="info" size="sm" />}
+        actions={
+          <div className="flex items-center gap-2">
+            <Link
+              href="/dashboard/leaves"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-[var(--surface)] hover:bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)] transition shadow-sm"
+            >
+              <CalendarDays className="w-3.5 h-3.5 text-[var(--accent)]" />
+              <span>Apply Leave</span>
+            </Link>
+            <Link
+              href="/dashboard/doubts"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-[var(--accent)] hover:opacity-90 text-[var(--accent-fg)] transition shadow-sm"
+            >
+              <HelpCircle className="w-3.5 h-3.5" />
+              <span>Ask Doubt</span>
+            </Link>
+          </div>
+        }
+      />
+
+      {/* 2. Today's Strip: Next Class, Due Items, Notices */}
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.18 }}
+        className="p-4 md:p-5 rounded-2xl border border-[var(--border)] bg-gradient-to-r from-[var(--surface)] to-[var(--surface-2)] shadow-sm"
+      >
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          {/* Next Class Focus */}
+          <div className="flex items-start md:items-center gap-3.5 min-w-0">
+            <div className="w-11 h-11 rounded-2xl bg-[var(--accent)]/10 border border-[var(--accent)]/20 flex items-center justify-center shrink-0">
+              <Clock className="w-5 h-5 text-[var(--accent)]" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-[var(--accent)]">
+                  Next Scheduled Class
+                </span>
+                {todayStrip.nextClass?.isNext && (
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                    Up Next
+                  </span>
+                )}
+              </div>
+              <h3 className="text-sm font-bold text-[var(--text)] truncate mt-0.5">
+                {todayStrip.nextClass ? `${todayStrip.nextClass.subjectCode}: ${todayStrip.nextClass.subjectName}` : 'No further classes scheduled today'}
+              </h3>
+              {todayStrip.nextClass && (
+                <div className="flex items-center gap-3 text-xs text-[var(--text-muted)] mt-0.5 flex-wrap">
+                  <span className="flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    {todayStrip.nextClass.time}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <MapPin className="w-3 h-3" />
+                    {todayStrip.nextClass.room}
+                  </span>
+                  <span className="hidden sm:inline">• {todayStrip.nextClass.facultyName}</span>
+                </div>
+              )}
+            </div>
           </div>
 
-          <div className="bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl p-4 flex gap-6 shrink-0 font-sans">
-            <div>
-              <span className="text-[10px] text-indigo-205 font-semibold uppercase tracking-wider block">Target CGPA</span>
-              <span className="text-2xl font-bold text-white">8.72</span>
-            </div>
-            <div className="w-px bg-white/10" />
-            <div>
-              <span className="text-[10px] text-indigo-205 font-semibold uppercase tracking-wider block">Term Attendance</span>
-              <span className="text-2xl font-bold text-white">{attendancePercentage}%</span>
-            </div>
+          {/* Due Items & Notices */}
+          <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+            {/* Fee Due Alert */}
+            <Link
+              href="/dashboard/fees"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-300 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/20 text-xs text-amber-800 dark:text-amber-200 hover:opacity-90 transition shadow-xs"
+            >
+              <CreditCard className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+              <span className="font-bold">Fee Due: Mar 31</span>
+              <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-amber-200/50 dark:bg-amber-800/40 font-extrabold">
+                {feeSummary.formattedBalance}
+              </span>
+            </Link>
+
+            {/* Pending Requests / Due Tasks */}
+            <Link
+              href="/dashboard/leaves"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] transition text-xs text-[var(--text)]"
+            >
+              <CalendarDays className="w-3.5 h-3.5 text-[var(--accent)] shrink-0" />
+              <span className="font-semibold">{todayStrip.pendingItemsCount} Active Request{todayStrip.pendingItemsCount === 1 ? '' : 's'}</span>
+            </Link>
+
+            {/* Urgent Notices */}
+            {todayStrip.urgentNotices.map((notice) => (
+              <Link
+                key={notice.id}
+                href="/dashboard/announcements"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] transition text-xs"
+              >
+                <Bell className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                <span className="font-semibold text-[var(--text)] truncate max-w-[170px]">
+                  {notice.title}
+                </span>
+                <span className="text-[10px] text-[var(--text-muted)] font-mono">
+                  {notice.timeAgo}
+                </span>
+              </Link>
+            ))}
           </div>
         </div>
       </motion.div>
 
-      {/* 2. CORE PERFORMANCE METRICS ROW */}
-      <motion.div
-        variants={itemVariants}
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5"
-      >
-        {/* Attendance widget */}
-        <Link
-          href="/dashboard/attendance"
-          className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm hover:border-indigo-400 transition group flex items-center justify-between"
-        >
-          <div className="space-y-1.5">
-            <span className="text-[9.5px] font-semibold text-slate-500 uppercase tracking-widest block">My Attendance</span>
-            <span className="text-xl font-bold text-slate-900 block group-hover:text-indigo-650 transition">{attendancePercentage}%</span>
-            <span className="text-[10.5px] text-slate-500 block font-semibold">Min 75% standard required</span>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 flex items-center justify-center shrink-0">
-            <Percent className="w-5 h-5" />
-          </div>
-        </Link>
+      {/* 3. Authoritative Metric Cards (SGPA, CGPA, Fee, Attendance) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Attendance Summary */}
+        <StatCard
+          title="Attendance"
+          value={`${overall.percentage.toFixed(1)}%`}
+          subtext={
+            overall.isShortage
+              ? `Shortage alert! Attend next ${overall.classesNeededToRecover} classes.`
+              : `Safe: can miss up to ${overall.classesAllowedToMiss} classes.`
+          }
+          icon={CalendarCheck}
+          delta={{
+            value: overall.isShortage ? 'Below 75%' : 'Eligible',
+            isPositive: !overall.isShortage,
+          }}
+        />
 
-        {/* GPA Summary widget */}
-        <Link
-          href="/dashboard/exams"
-          className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm hover:border-indigo-400 transition group flex items-center justify-between"
-        >
-          <div className="space-y-1.5">
-            <span className="text-[9.5px] font-semibold text-slate-500 uppercase tracking-widest block">Academic GPA</span>
-            <span className="text-xl font-bold text-slate-900 block group-hover:text-indigo-650 transition">8.72 CGPA</span>
-            <span className="text-[10.5px] text-slate-500 block font-semibold">SGPA Last Term: 8.94</span>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 flex items-center justify-center shrink-0">
-            <Award className="w-5 h-5" />
-          </div>
-        </Link>
-
-        {/* Pending Invoices widget */}
-        <Link
-          href="/dashboard/fees"
-          className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm hover:border-indigo-400 transition group flex items-center justify-between"
-        >
-          <div className="space-y-1.5">
-            <span className="text-[9.5px] font-semibold text-slate-500 uppercase tracking-widest block">Outstanding Fees</span>
-            <span className={`text-xl font-bold block group-hover:text-indigo-650 transition ${feesSummary.pending > 0 ? 'text-amber-600' : 'text-slate-900'}`}>
-              ₹{feesSummary.pending.toLocaleString()}
+        {/* SGPA with Trend Sparkline */}
+        <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">
+              Semester 5 SGPA
             </span>
-            <span className="text-[10.5px] text-slate-500 block font-semibold">
-              {feesSummary.pending > 0 ? 'Payment due soon' : 'All invoices settled'}
-            </span>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 flex items-center justify-center shrink-0">
-            <CreditCard className="w-5 h-5" />
-          </div>
-        </Link>
-
-        {/* Analytics Growth status */}
-        <Link
-          href="/dashboard/performance"
-          className="bg-white border border-slate-200 p-5 rounded-2xl shadow-sm hover:border-indigo-400 transition group flex items-center justify-between"
-        >
-          <div className="space-y-1.5">
-            <span className="text-[9.5px] font-semibold text-slate-500 uppercase tracking-widest block">Growth Index</span>
-            <span className="text-xl font-bold text-slate-900 block group-hover:text-indigo-650 transition">Top 10%</span>
-            <span className="text-[10.5px] text-slate-500 block font-semibold">Consistently improving CGPA</span>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-600 flex items-center justify-center shrink-0">
-            <TrendingUp className="w-5 h-5" />
-          </div>
-        </Link>
-      </motion.div>
-
-      {/* 3. ROW 3: INTERACTIVE CHARTS & ANNOUNCEMENTS */}
-      <motion.div
-        variants={itemVariants}
-        className="grid grid-cols-1 lg:grid-cols-3 gap-6"
-      >
-        {/* Attendance radial progress chart */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col justify-between">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-            <div className="flex items-center gap-2">
-              <Clock className="w-4.5 h-4.5 text-indigo-600" />
-              <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wider">Attendance Clearance</h3>
+            <div className="p-2 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400">
+              <Award className="w-4 h-4" />
             </div>
-            <Link href="/dashboard/attendance" className="text-xs text-indigo-600 hover:text-indigo-850 font-semibold">
+          </div>
+          <div>
+            <div className="flex items-baseline gap-2 mt-2">
+              <span className="text-2xl font-black text-[var(--text)] tabular-nums">
+                {academicSummary.currentSgpa.toFixed(2)}
+              </span>
+              <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                +0.10 vs Sem 4
+              </span>
+            </div>
+            {/* SVG Trend Sparkline */}
+            <SgpaSparkline trend={academicSummary.trend} />
+          </div>
+        </div>
+
+        {/* Cumulative CGPA */}
+        <StatCard
+          title="Cumulative CGPA"
+          value={academicSummary.cgpa.toFixed(2)}
+          subtext={`${academicSummary.totalCreditsEarned} credits completed`}
+          icon={TrendingUp}
+          delta={{
+            value: 'Top 10%',
+            isPositive: true,
+          }}
+        />
+
+        {/* Fee Balance & Due Date */}
+        <StatCard
+          title="Outstanding Fees"
+          value={feeSummary.formattedBalance}
+          subtext={`Due: ${new Date(feeSummary.nextDueDate).toLocaleDateString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          })}`}
+          icon={CreditCard}
+          delta={{
+            value: feeSummary.balance.isFullyPaid ? 'Cleared' : 'Due Soon',
+            isPositive: feeSummary.balance.isFullyPaid,
+          }}
+        />
+      </div>
+
+      {/* 4. Attendance Ring & Subject Breakdown */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Institutional Attendance Ring */}
+        <div className="p-5 md:p-6 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-[var(--text)]">Institutional Attendance</h3>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                  Mandatory Threshold: 75.00%
+                </p>
+              </div>
+              <Link
+                href="/dashboard/attendance"
+                className="text-xs font-bold text-[var(--accent)] hover:underline inline-flex items-center gap-1"
+              >
+                Full Log <ArrowRight className="w-3 h-3" />
+              </Link>
+            </div>
+
+            <div className="my-6 flex flex-col items-center justify-center">
+              <ProgressRing
+                value={overall.percentage}
+                size={140}
+                strokeWidth={12}
+                threshold={75}
+                label="Overall Attendance"
+              />
+              <div className="mt-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/25 text-[10px] font-mono font-bold text-amber-700 dark:text-amber-300">
+                <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                <span>Institutional Threshold: 75.00%</span>
+              </div>
+              <p className="text-xs text-center mt-2 font-semibold text-[var(--text-muted)]">
+                {overall.attendedSessions} of {overall.totalSessions} sessions attended
+              </p>
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl bg-[var(--surface-2)]/70 border border-[var(--border)]/60 text-xs">
+            {overall.isShortage ? (
+              <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400 font-bold">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>Shortage Alert! You must attend {overall.classesNeededToRecover} consecutive classes to meet 75%.</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-bold">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>Good Standing: Attendance is above 75% threshold.</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Per-Subject Attendance Chips */}
+        <div className="lg:col-span-2 p-5 md:p-6 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-sm font-bold text-[var(--text)]">Per-Subject Attendance Roster</h3>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                  Semester 6 Enrolled Subjects & Realtime Percentages
+                </p>
+              </div>
+              <StatusBadge
+                label={`${attendanceSummary.subjects.length} Enrolled`}
+                variant="info"
+                size="sm"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {attendanceSummary.subjects.map((sub) => {
+                const isShort = sub.metrics.isShortage;
+                const isWarning = !isShort && sub.metrics.percentage < 80;
+
+                return (
+                  <div
+                    key={sub.subjectId}
+                    className={`p-3.5 rounded-xl border transition-all ${
+                      isShort
+                        ? 'border-rose-300 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/20'
+                        : 'border-[var(--border)] bg-[var(--surface-2)]/30 hover:bg-[var(--surface-2)]/60'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-mono font-extrabold text-[var(--accent)] block">
+                          {sub.subjectCode} • {sub.credits} Credits
+                        </span>
+                        <h4 className="text-xs font-bold text-[var(--text)] truncate mt-0.5">
+                          {sub.subjectName}
+                        </h4>
+                        <span className="text-[11px] text-[var(--text-muted)] block mt-0.5 truncate">
+                          {sub.facultyName}
+                        </span>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <span
+                          className={`text-sm font-black tabular-nums block ${
+                            isShort ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
+                          }`}
+                        >
+                          {sub.metrics.percentage.toFixed(0)}%
+                        </span>
+                        <span className="text-[10px] text-[var(--text-muted)] block mt-0.5 font-mono">
+                          {sub.metrics.attendedSessions}/{sub.metrics.totalSessions}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Per-Subject Attendance Chip (Color, Icon, Label) */}
+                    <div className="pt-2 border-t border-[var(--border)]/60 flex items-center justify-between">
+                      {isShort ? (
+                        <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                          <AlertTriangle className="w-3 h-3 text-rose-600 dark:text-rose-400" />
+                          <span>Shortage (&lt;75%)</span>
+                        </div>
+                      ) : isWarning ? (
+                        <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                          <Clock className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                          <span>Near Limit (75-80%)</span>
+                        </div>
+                      ) : (
+                        <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                          <span>Good Standing (≥75%)</span>
+                        </div>
+                      )}
+                      <span className="text-[10px] font-mono text-[var(--text-muted)]">
+                        {isShort ? `Attend ${sub.metrics.classesNeededToRecover}` : `Can miss ${sub.metrics.classesAllowedToMiss}`}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mt-4 pt-3 border-t border-[var(--border)]/60 flex items-center justify-between text-xs text-[var(--text-muted)]">
+            <span>Institutional Policy: Minimum 75% required to sit for final semester examinations.</span>
+            <Link href="/dashboard/attendance" className="font-bold text-[var(--accent)] hover:underline shrink-0">
               Details
             </Link>
           </div>
-
-          <div className="flex flex-col items-center justify-center my-6">
-            <div className="relative w-32 h-32 flex items-center justify-center">
-              <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-                <circle cx="50" cy="50" r="40" stroke="#E2E8F0" strokeWidth="7.5" fill="transparent" />
-                <motion.circle
-                  cx="50"
-                  cy="50"
-                  r="40"
-                  stroke="#4F46E5"
-                  strokeWidth="7.5"
-                  fill="transparent"
-                  strokeDasharray="251.2"
-                  initial={{ strokeDashoffset: 251.2 }}
-                  animate={{ strokeDashoffset: 251.2 - (251.2 * attendancePercentage) / 100 }}
-                  transition={{ duration: 1.2, ease: 'easeOut' }}
-                />
-              </svg>
-              <div className="absolute flex flex-col items-center justify-center text-center">
-                <span className="text-2xl font-bold text-slate-900 tracking-tight">{attendancePercentage}%</span>
-                <span className="text-[9.5px] text-slate-505 font-semibold uppercase tracking-wider">Attendance</span>
-              </div>
-            </div>
-            
-            <p className="text-center text-xs text-slate-650 mt-5 max-w-[200px] leading-relaxed font-semibold">
-              {attendancePercentage >= 75 
-                ? 'Your attendance rate is safely above the registrar limit.' 
-                : 'Alert! Your attendance has fallen below 75% thresholds.'}
-            </p>
-          </div>
-
-          <div className="pt-4 border-t border-slate-200 flex items-center justify-between text-xs font-semibold">
-            <span className="text-slate-500 font-semibold">Requirement Clearance</span>
-            <span className={`px-3 py-0.5 rounded-full text-[9.5px] uppercase font-semibold border ${
-              attendancePercentage >= 75 
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-100' 
-                : 'bg-rose-50 text-rose-700 border-rose-100'
-            }`}>
-              {attendancePercentage >= 75 ? 'Approved' : 'Critical'}
-            </span>
-          </div>
         </div>
+      </div>
 
-        {/* Circular Noticeboard widget */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm flex flex-col justify-between lg:col-span-2">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-            <div className="flex items-center gap-2">
-              <Megaphone className="w-4.5 h-4.5 text-indigo-650" />
-              <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wider">Notice Board</h3>
-            </div>
-            <Link href="/dashboard/announcements" className="text-xs text-indigo-600 hover:text-indigo-855 font-semibold">
-              Noticeboard
+      {/* 5. Upcoming Exams, Announcements & Quick Actions */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Upcoming Exams */}
+        <div className="p-5 md:p-6 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-[var(--text)] flex items-center gap-2">
+              <Award className="w-4 h-4 text-[var(--accent)]" />
+              Upcoming Examinations
+            </h3>
+            <Link
+              href="/dashboard/exams"
+              className="text-xs font-bold text-[var(--accent)] hover:underline"
+            >
+              View All
             </Link>
           </div>
 
-          <div className="divide-y divide-slate-200 flex-1 my-2">
-            {displayAnnouncements.map((item: any) => (
-              <div key={item.id} className="py-3.5 first:pt-2 last:pb-2">
-                <div className="flex items-start justify-between gap-4">
-                  <span className="font-semibold text-slate-900 text-xs hover:text-indigo-650 transition block leading-snug">
-                    {item.title}
-                  </span>
-                  <span className={`text-[9px] font-semibold uppercase tracking-wider px-2 py-0.5 border rounded-full shrink-0 ${
-                    item.priority === 'Critical'
-                      ? 'bg-rose-50 border-rose-100 text-rose-700'
-                      : item.priority === 'High'
-                      ? 'bg-amber-50 border-amber-100 text-amber-700'
-                      : 'bg-slate-50 border-slate-200 text-slate-500'
-                  }`}>
-                    {item.priority}
-                  </span>
+          {upcomingExams.length === 0 ? (
+            <EmptyState
+              title="No upcoming exams"
+              description="No exams scheduled at this time."
+              className="py-8"
+            />
+          ) : (
+            <div className="space-y-2.5">
+              {upcomingExams.map((exam) => (
+                <div
+                  key={exam.id}
+                  className="p-3 rounded-xl border border-[var(--border)] bg-[var(--surface-2)]/30 hover:bg-[var(--surface-2)]/60 transition"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="text-[10px] font-mono font-extrabold text-[var(--accent)]">
+                        {exam.subjectCode} • {exam.type}
+                      </span>
+                      <h4 className="text-xs font-bold text-[var(--text)] mt-0.5">
+                        {exam.subjectName}
+                      </h4>
+                    </div>
+                    <StatusBadge label={`${exam.weightage}% wt`} variant="info" size="sm" />
+                  </div>
+                  <div className="mt-2 flex items-center gap-3 text-[11px] text-[var(--text-muted)] font-mono">
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      {new Date(exam.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} • {exam.time}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <MapPin className="w-3 h-3" />
+                      {exam.room}
+                    </span>
+                  </div>
                 </div>
-                <p className="text-slate-600 text-xs mt-1.5 line-clamp-2 leading-relaxed font-semibold">{item.content}</p>
-                <div className="flex items-center gap-3 mt-3 text-[9.5px] text-slate-550 font-semibold">
-                  <span className="flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-slate-400" />
-                    {new Date(item.created_at).toLocaleDateString(undefined, {
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
-                  </span>
-                  <span>•</span>
-                  <span className="uppercase tracking-wider text-indigo-650">{item.category}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </motion.div>
-
-      {/* 5. BOTTOM GRID: UPCOMING ACTIVITIES & TIMELINE */}
-      <motion.div
-        variants={itemVariants}
-        className="grid grid-cols-1 lg:grid-cols-3 gap-6"
-      >
-        {/* Events cards grid */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm lg:col-span-2 space-y-5">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4.5 h-4.5 text-indigo-655" />
-              <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wider">Campus Activities</h3>
+              ))}
             </div>
-            <Link href="/dashboard/activities" className="text-xs text-indigo-600 hover:text-indigo-855 font-semibold">
-              Browse Events
+          )}
+        </div>
+
+        {/* Recent Announcements */}
+        <div className="p-5 md:p-6 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-[var(--text)] flex items-center gap-2">
+              <Megaphone className="w-4 h-4 text-[var(--accent)]" />
+              Official Notices & Circulars
+            </h3>
+            <Link
+              href="/dashboard/announcements"
+              className="text-xs font-bold text-[var(--accent)] hover:underline"
+            >
+              Browse
             </Link>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {displayActivities.map((item: any) => (
-              <div
-                key={item.id}
-                className="p-4 bg-white border border-slate-200 rounded-2xl flex gap-3.5 hover:border-slate-300 transition duration-300 group"
+          <div className="space-y-2.5">
+            {recentAnnouncements.map((ann) => (
+              <Link
+                key={ann.id}
+                href="/dashboard/announcements"
+                className="block p-3 rounded-xl border border-[var(--border)] bg-[var(--surface-2)]/30 hover:bg-[var(--surface-2)]/60 transition"
               >
-                <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 flex items-center justify-center shrink-0">
-                  <Sparkles className="w-5 h-5 animate-pulse" />
-                </div>
-                <div className="overflow-hidden flex flex-col justify-between">
-                  <span className="font-semibold text-slate-900 text-xs truncate group-hover:text-indigo-655 transition block">
-                    {item.title}
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <StatusBadge
+                    label={ann.priority}
+                    variant={ann.priority === 'Critical' ? 'danger' : ann.priority === 'High' ? 'warning' : 'neutral'}
+                    size="sm"
+                  />
+                  <span className="text-[10px] text-[var(--text-muted)] font-mono">
+                    {new Date(ann.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                   </span>
-                  <p className="text-[10px] text-slate-500 font-semibold flex items-center gap-1.5 mt-1.5">
-                    <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                    {new Date(item.start_date).toLocaleDateString(undefined, {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                    })}
-                  </p>
-                  <p className="text-[10px] text-slate-500 font-semibold truncate mt-1">{item.venue}</p>
                 </div>
-              </div>
+                <h4 className="text-xs font-bold text-[var(--text)] leading-snug line-clamp-1">
+                  {ann.title}
+                </h4>
+                <p className="text-xs text-[var(--text-muted)] mt-1 line-clamp-2 leading-relaxed">
+                  {ann.content}
+                </p>
+              </Link>
             ))}
           </div>
         </div>
 
-        {/* Term deadlines timeline widget */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-            <div className="flex items-center gap-2">
-              <Calendar className="w-4.5 h-4.5 text-indigo-600" />
-              <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wider">Academic Milestones</h3>
+        {/* Quick Launch & Pending Requests */}
+        <div className="p-5 md:p-6 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm space-y-4 flex flex-col justify-between">
+          <div className="space-y-3">
+            <h3 className="text-sm font-bold text-[var(--text)] flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-[var(--accent)]" />
+              Quick Action Hub
+            </h3>
+
+            {/* Pending Requests Overview */}
+            <div className="grid grid-cols-2 gap-2">
+              <Link
+                href="/dashboard/leaves"
+                className="p-3 rounded-xl border border-[var(--border)] bg-[var(--surface-2)]/40 hover:bg-[var(--surface-2)] transition text-center"
+              >
+                <span className="text-lg font-black text-[var(--text)] block">
+                  {pendingRequestsCount.leaves}
+                </span>
+                <span className="text-[11px] font-semibold text-[var(--text-muted)]">
+                  Leave Request
+                </span>
+              </Link>
+              <Link
+                href="/dashboard/doubts"
+                className="p-3 rounded-xl border border-[var(--border)] bg-[var(--surface-2)]/40 hover:bg-[var(--surface-2)] transition text-center"
+              >
+                <span className="text-lg font-black text-[var(--text)] block">
+                  {pendingRequestsCount.doubts}
+                </span>
+                <span className="text-[11px] font-semibold text-[var(--text-muted)]">
+                  Active Doubt
+                </span>
+              </Link>
+            </div>
+
+            {/* Direct Links */}
+            <div className="space-y-1.5 pt-2">
+              <Link
+                href="/dashboard/notes"
+                className="flex items-center justify-between p-2.5 rounded-xl border border-[var(--border)] hover:bg-[var(--surface-2)] transition text-xs font-bold text-[var(--text)]"
+              >
+                <span className="flex items-center gap-2">
+                  <BookOpen className="w-4 h-4 text-[var(--accent)]" />
+                  Course Notes & Handouts
+                </span>
+                <ChevronRight className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+              </Link>
+              <Link
+                href="/dashboard/fees"
+                className="flex items-center justify-between p-2.5 rounded-xl border border-[var(--border)] hover:bg-[var(--surface-2)] transition text-xs font-bold text-[var(--text)]"
+              >
+                <span className="flex items-center gap-2">
+                  <CreditCard className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  Fee Ledger & Receipts
+                </span>
+                <ChevronRight className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+              </Link>
+              <Link
+                href="/dashboard/performance"
+                className="flex items-center justify-between p-2.5 rounded-xl border border-[var(--border)] hover:bg-[var(--surface-2)] transition text-xs font-bold text-[var(--text)]"
+              >
+                <span className="flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                  CGPA Progression Chart
+                </span>
+                <ChevronRight className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+              </Link>
             </div>
           </div>
 
-          <div className="relative pl-6 border-l border-slate-200 space-y-5 py-1">
-            {[
-              { title: 'Fee Payment Deadline', date: feesSummary.nextDue ? new Date(feesSummary.nextDue).toLocaleDateString() : 'June 30, 2026', type: 'fees' },
-              { title: 'End-Semester Exam Registrations', date: 'Jul 15, 2026', type: 'exams' },
-              { title: 'Compiler Design Lab Term Upload', date: 'Jul 24, 2026', type: 'assignment' },
-            ].map((ev, i) => (
-              <div key={i} className="relative group">
-                <div className="absolute top-1 -left-[31px] w-4 h-4 rounded-full bg-white border-2 border-indigo-600 flex items-center justify-center shadow-sm">
-                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-pulse" />
-                </div>
-                <div>
-                  <span className="font-semibold text-slate-800 text-xs block leading-tight">{ev.title}</span>
-                  <span className="text-[10px] text-slate-500 font-semibold block mt-1.5">{ev.date}</span>
-                </div>
-              </div>
-            ))}
+          <div className="p-3 rounded-xl bg-[var(--accent-soft)] text-xs text-[var(--accent)] font-semibold flex items-center justify-between">
+            <span>Need immediate academic assistance?</span>
+            <Link href="/dashboard/camai" className="font-extrabold hover:underline">
+              Launch CamAI →
+            </Link>
           </div>
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 }

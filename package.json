@@ -2,14 +2,19 @@
   "name": "campai",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --test --experimental-strip-types tests/calculations.test.ts tests/security-matrix.test.ts tests/motion-and-tokens.test.ts tests/student-workflows.test.ts tests/faculty-workflows.test.ts tests/admin-workflows.test.ts tests/cross-module-integration.test.ts tests/load-and-concurrency.test.ts tests/accessibility-and-motion-qa.test.ts tests/backup-restore-drill.test.ts",
+    "budget:check": "node scripts/check-bundle-budget.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.118.0",
     "@tanstack/react-query": "^5.101.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -25,12 +30,14 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.11",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "eslint": "^9",
     "eslint-config-next": "^15.1.0",
+    "fast-check": "^4.10.2",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

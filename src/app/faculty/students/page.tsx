@@ -2,325 +2,428 @@
 
 import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
+import { FacultyService, type ScopedStudent } from '@/lib/services/faculty-service';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { SkeletonList, SkeletonCard } from '@/components/ui/skeleton';
 import {
   Users,
   Search,
   Filter,
   ArrowLeft,
+  Mail,
   Phone,
   MapPin,
-  Mail,
   Award,
   AlertTriangle,
-  CalendarDays,
-  HelpCircle,
-  FileSpreadsheet,
+  CalendarCheck,
+  CheckCircle,
+  GraduationCap,
+  BookOpen,
+  UserCheck,
+  ChevronRight,
+  ExternalLink,
 } from 'lucide-react';
 import Link from 'next/link';
 
-export default function StudentsDirectoryPage() {
+export default function ScopedStudentsDirectoryPage() {
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedSection, setSelectedSection] = useState('All');
+  const [selectedBatch, setSelectedBatch] = useState('All');
+  const [selectedStatus, setSelectedStatus] = useState<'all' | 'active' | 'at_risk' | 'on_leave'>('all');
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
 
-  // Fetch Students list
-  const { data: students, isLoading } = useQuery({
-    queryKey: ['students-directory-list'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('students')
-        .select(`
-          *,
-          departments(name, code),
-          courses(name, code),
-          semesters(number)
-        `)
-        .order('student_id', { ascending: true });
-      if (error) throw error;
-      return data;
-    },
+  // 1. Fetch Scoped Students
+  const {
+    data: students,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ['scoped-students', selectedSection, selectedBatch, selectedStatus],
+    queryFn: () =>
+      FacultyService.getScopedStudents('00000000-0000-0000-0000-000000000020', {
+        section: selectedSection,
+        batch: selectedBatch,
+        status: selectedStatus,
+      }),
   });
 
-  // Fetch Selected Student Extra Details (Attendance & results)
-  const { data: studentAcademicDetails } = useQuery({
-    queryKey: ['student-academic-details', selectedStudentId],
-    queryFn: async () => {
-      if (!selectedStudentId) return null;
-      
-      const { data: attendance } = await supabase
-        .from('attendance')
-        .select('*, subjects(*)')
-        .eq('student_id', selectedStudentId);
-
-      const { data: results } = await supabase
-        .from('results')
-        .select('*, subjects(*)')
-        .eq('student_id', selectedStudentId);
-
-      const { data: leaves } = await supabase
-        .from('leave_requests')
-        .select('*')
-        .eq('student_id', selectedStudentId)
-        .order('created_at', { ascending: false });
-
-      const { data: doubts } = await supabase
-        .from('doubts')
-        .select('*, subjects(*)')
-        .eq('student_id', selectedStudentId)
-        .order('created_at', { ascending: false });
-
-      return {
-        attendance: attendance || [],
-        results: results || [],
-        leaves: leaves || [],
-        doubts: doubts || [],
-      };
-    },
-    enabled: !!selectedStudentId,
-  });
-
-  // Filter student lists
+  // Client-side search filtering
   const filteredStudents = useMemo(() => {
     if (!students) return [];
-    return students.filter((s: any) => {
-      const fullName = `${s.first_name} ${s.last_name}`.toLowerCase();
-      const matchesQuery =
-        fullName.includes(searchQuery.toLowerCase()) ||
-        s.student_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        s.email.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchesQuery;
-    });
+    if (!searchQuery.trim()) return students;
+    const q = searchQuery.toLowerCase().trim();
+    return students.filter(
+      (s) =>
+        s.name.toLowerCase().includes(q) ||
+        s.rollNo.toLowerCase().includes(q) ||
+        s.enrollmentNo.toLowerCase().includes(q) ||
+        s.email.toLowerCase().includes(q)
+    );
   }, [students, searchQuery]);
 
-  // Set default student select on load
-  React.useEffect(() => {
-    if (filteredStudents.length > 0 && !selectedStudentId) {
-      setSelectedStudentId(filteredStudents[0].id);
+  // Set default selected student
+  const activeStudent = useMemo(() => {
+    if (!filteredStudents || filteredStudents.length === 0) return null;
+    if (selectedStudentId) {
+      const found = filteredStudents.find((s) => s.id === selectedStudentId);
+      if (found) return found;
     }
+    return filteredStudents[0];
   }, [filteredStudents, selectedStudentId]);
 
-  const activeStudent = useMemo(() => {
-    return students?.find((s) => s.id === selectedStudentId);
-  }, [students, selectedStudentId]);
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <SkeletonCard height={80} />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <SkeletonList count={6} />
+          <div className="md:col-span-2">
+            <SkeletonCard height={400} />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  // Calculate stats for detail view
-  const calculatedStats = useMemo(() => {
-    if (!studentAcademicDetails) return { attendanceRate: 0, totalClasses: 0, backlogCount: 0 };
-    const atts = studentAcademicDetails.attendance;
-    const total = atts.length;
-    const present = atts.filter((a: any) => a.status === 'Present' || a.status === 'Late').length;
-    const attendanceRate = total > 0 ? Math.round((present / total) * 100) : 100;
-    
-    return {
-      attendanceRate,
-      totalClasses: total,
-    };
-  }, [studentAcademicDetails]);
+  if (isError || !students) {
+    return (
+      <ErrorState
+        title="Failed to Load Scoped Directory"
+        message={error instanceof Error ? error.message : 'Unable to query student profiles.'}
+        onRetry={() => refetch()}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <Link href="/faculty" className="text-xs text-slate-500 hover:text-blue-600 font-semibold flex items-center gap-1 mb-2">
-          <ArrowLeft className="w-3.5 h-3.5" /> Back to Workspace
-        </Link>
-        <h2 className="text-2xl font-bold tracking-tight text-slate-900">Student Directory & Profiles</h2>
-        <p className="text-slate-500 text-xs mt-1">Search student portfolios, audit attendance profiles, and view academic reports.</p>
+      {/* 1. PAGE HEADER */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 rounded-3xl bg-card border border-border shadow-xs">
+        <div>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground font-semibold mb-1">
+            <Link href="/faculty" className="hover:text-primary flex items-center gap-1">
+              <ArrowLeft className="w-3.5 h-3.5" /> Faculty Console
+            </Link>
+            <span>•</span>
+            <span>Department: Computer Science & Engineering</span>
+            <span>•</span>
+            <span>Enrolled Roster: {students.length} Students</span>
+          </div>
+          <h1 className="text-xl md:text-2xl font-black text-foreground tracking-tight">
+            Scoped Students Directory
+          </h1>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <Link
+            href="/faculty/attendance"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-xs shadow-xs hover:bg-primary/90 transition-all"
+          >
+            <CalendarCheck className="w-4 h-4" />
+            <span>Take Roll Call</span>
+          </Link>
+        </div>
       </div>
 
-      {/* Directory Split Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Left Side: Student List */}
-        <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col h-[75vh]">
-          {/* List Search */}
-          <div className="p-4 border-b border-slate-100 flex items-center gap-3 bg-slate-50/50">
-            <div className="relative flex-grow">
-              <Search className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search students by name, ID, or email..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-white border border-slate-200 rounded-xl py-2 pl-10 pr-4 text-xs placeholder-slate-400 focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
+      {/* 2. FILTER & SEARCH TOOLBAR */}
+      <div className="p-4 rounded-2xl bg-card border border-border shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="relative flex-1 max-w-md">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Search by student name, roll number, or enrolment..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-4 py-2 rounded-xl bg-muted/40 border border-border/80 text-xs text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/40"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Section Filter */}
+          <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-xl border border-border/60 text-xs font-bold">
+            <span className="px-2 text-muted-foreground text-[10px] uppercase">Section:</span>
+            {['All', 'Section A', 'Section B'].map((sec) => (
+              <button
+                key={sec}
+                onClick={() => setSelectedSection(sec)}
+                className={`px-2.5 py-1 rounded-lg transition-all ${
+                  selectedSection === sec
+                    ? 'bg-card text-foreground shadow-xs'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {sec}
+              </button>
+            ))}
           </div>
 
-          {/* Directory Table */}
-          <div className="flex-grow overflow-y-auto">
-            {isLoading ? (
-              <div className="text-center py-12 text-slate-400 text-xs">Loading directory...</div>
-            ) : filteredStudents.length === 0 ? (
-              <div className="text-center py-16 text-slate-400 text-xs">No students found.</div>
+          {/* Batch Filter */}
+          <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-xl border border-border/60 text-xs font-bold">
+            <span className="px-2 text-muted-foreground text-[10px] uppercase">Batch:</span>
+            {['All', '2023-2027', '2022-2026'].map((b) => (
+              <button
+                key={b}
+                onClick={() => setSelectedBatch(b)}
+                className={`px-2.5 py-1 rounded-lg transition-all ${
+                  selectedBatch === b
+                    ? 'bg-card text-foreground shadow-xs'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {b}
+              </button>
+            ))}
+          </div>
+
+          {/* Risk Status Filter */}
+          <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-xl border border-border/60 text-xs font-bold">
+            <span className="px-2 text-muted-foreground text-[10px] uppercase">Status:</span>
+            {(['all', 'active', 'at_risk'] as const).map((st) => (
+              <button
+                key={st}
+                onClick={() => setSelectedStatus(st)}
+                className={`px-2.5 py-1 rounded-lg transition-all capitalize ${
+                  selectedStatus === st
+                    ? 'bg-card text-foreground shadow-xs'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {st === 'at_risk' ? 'At Risk (<75%)' : st}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* 3. SPLIT-PANE DIRECTORY (List on Left, Rich Academic Dossier on Right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Pane: Student List */}
+        <div className="lg:col-span-5 rounded-3xl bg-card border border-border shadow-xs overflow-hidden max-h-[750px] flex flex-col">
+          <div className="p-3.5 bg-muted/50 border-b border-border text-xs font-bold text-muted-foreground flex items-center justify-between">
+            <span>Enrolled Students ({filteredStudents.length})</span>
+            <span>Click to inspect dossier</span>
+          </div>
+
+          <div className="flex-1 overflow-y-auto divide-y divide-border/40">
+            {filteredStudents.length === 0 ? (
+              <EmptyState
+                icon={Users}
+                title="No Students Found"
+                description="No student profiles match your search criteria."
+              />
             ) : (
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 uppercase tracking-wider font-bold text-[9px] sticky top-0 z-10">
-                    <th className="p-3.5 pl-5">Student ID</th>
-                    <th className="p-3.5">Name</th>
-                    <th className="p-3.5">Department</th>
-                    <th className="p-3.5 text-center">CGPA</th>
-                    <th className="p-3.5 text-center">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredStudents.map((s: any) => {
-                    const isSelected = selectedStudentId === s.id;
-                    return (
-                      <tr
-                        key={s.id}
-                        onClick={() => setSelectedStudentId(s.id)}
-                        className={`cursor-pointer transition ${
-                          isSelected ? 'bg-blue-50/40 font-semibold' : 'hover:bg-slate-50/60'
+              filteredStudents.map((s) => {
+                const isSelected = activeStudent?.id === s.id;
+                return (
+                  <div
+                    key={s.id}
+                    onClick={() => setSelectedStudentId(s.id)}
+                    className={`p-3.5 transition-colors cursor-pointer flex items-center justify-between gap-3 ${
+                      isSelected
+                        ? 'bg-primary/10 border-l-4 border-l-primary'
+                        : 'hover:bg-muted/30'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-muted border border-border/60 flex items-center justify-center font-bold text-xs text-foreground shrink-0 uppercase">
+                        {s.name.split(' ').map((p) => p[0]).join('')}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-foreground">
+                            {s.name}
+                          </span>
+                          {s.isShortage && (
+                            <span className="px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[9px] font-bold">
+                              &lt;75%
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          {s.rollNo} • {s.section}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <span
+                        className={`font-mono text-xs font-bold ${
+                          s.isShortage ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
                         }`}
                       >
-                        <td className="p-3.5 pl-5 font-mono text-slate-500 font-bold">{s.student_id}</td>
-                        <td className="p-3.5 text-slate-900">
-                          {s.first_name} {s.last_name}
-                        </td>
-                        <td className="p-3.5 text-slate-500">{s.departments?.code}</td>
-                        <td className="p-3.5 text-center font-bold text-slate-700">{s.cgpa}</td>
-                        <td className="p-3.5 text-center">
-                          <span
-                            className={`inline-block px-2.5 py-0.5 rounded-full font-bold uppercase text-[9px] ${
-                              s.status === 'Active'
-                                ? 'bg-emerald-50 text-emerald-700'
-                                : 'bg-rose-50 text-rose-700'
-                            }`}
-                          >
-                            {s.status}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                        {s.attendancePercentage}%
+                      </span>
+                      <span className="block text-[10px] text-muted-foreground font-semibold">
+                        CGPA {s.cgpa}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
 
-        {/* Right Side: Profile Details */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm h-[75vh] overflow-y-auto space-y-6">
+        {/* Right Pane: Student Academic Profile & Dossier */}
+        <div className="lg:col-span-7">
           {activeStudent ? (
-            <>
+            <div className="p-6 rounded-3xl bg-card border border-border shadow-xs space-y-6">
               {/* Profile Card Header */}
-              <div className="flex items-center gap-4 border-b border-slate-100 pb-4">
-                <div className="w-12 h-12 rounded-full bg-blue-950 border border-blue-700/30 flex items-center justify-center text-blue-300 font-bold uppercase text-lg shrink-0">
-                  {activeStudent.first_name[0]}{activeStudent.last_name[0]}
-                </div>
-                <div className="overflow-hidden">
-                  <h3 className="text-sm font-bold text-slate-950 truncate">
-                    {activeStudent.first_name} {activeStudent.last_name}
-                  </h3>
-                  <span className="text-[10px] text-slate-400 font-mono block mt-0.5">{activeStudent.student_id}</span>
-                </div>
-              </div>
-
-              {/* Contact parameters */}
-              <div className="space-y-2 text-xs">
-                <div className="flex items-center gap-2.5 text-slate-600">
-                  <Mail className="w-4 h-4 text-slate-400 shrink-0" />
-                  <span className="truncate">{activeStudent.email}</span>
-                </div>
-                <div className="flex items-center gap-2.5 text-slate-600">
-                  <Phone className="w-4 h-4 text-slate-400 shrink-0" />
-                  <span>{activeStudent.phone || 'No phone'}</span>
-                </div>
-                <div className="flex items-center gap-2.5 text-slate-600">
-                  <MapPin className="w-4 h-4 text-slate-400 shrink-0" />
-                  <span className="truncate">{activeStudent.address || 'No address'}</span>
-                </div>
-              </div>
-
-              {/* Attendance and cgpa analytics panel */}
-              <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 border border-slate-100 rounded-xl">
-                <div>
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Attendance Rate</span>
-                  <div className="flex items-center gap-1.5 mt-1">
-                    <span className="text-lg font-bold text-slate-900">{calculatedStats.attendanceRate}%</span>
-                    {calculatedStats.attendanceRate < 75 && (
-                      <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" />
-                    )}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border/60">
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-primary/20 to-primary/40 border border-primary/30 flex items-center justify-center font-black text-xl text-primary shrink-0 uppercase">
+                    {activeStudent.name.split(' ').map((p) => p[0]).join('')}
                   </div>
-                  <span className="text-[8.5px] text-slate-400 font-semibold block mt-0.5">{calculatedStats.totalClasses} Lectures</span>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-lg font-bold text-foreground">
+                        {activeStudent.name}
+                      </h2>
+                      <StatusBadge
+                        status={activeStudent.isShortage ? 'pending' : 'active'}
+                        label={activeStudent.isShortage ? 'ATTENDANCE RISK' : 'IN GOOD STANDING'}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5 font-mono">
+                      Roll No: {activeStudent.rollNo} • Enrolment: {activeStudent.enrollmentNo}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {activeStudent.programme} • Semester {activeStudent.semester} ({activeStudent.section})
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">CGPA / SGPA</span>
-                  <p className="text-lg font-bold text-slate-900 mt-1">
-                    {activeStudent.cgpa} / {activeStudent.sgpa}
+
+                <div className="text-right shrink-0">
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
+                    Assigned Advisor
+                  </span>
+                  <span className="text-xs font-bold text-foreground">
+                    {activeStudent.advisor}
+                  </span>
+                </div>
+              </div>
+
+              {/* Key Metrics Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3.5 rounded-2xl bg-muted/40 border border-border/60">
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase">
+                    Attendance Rate
+                  </span>
+                  <p
+                    className={`text-xl font-black mt-1 font-mono ${
+                      activeStudent.isShortage ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
+                    }`}
+                  >
+                    {activeStudent.attendancePercentage}%
                   </p>
-                  <span className="text-[8.5px] text-slate-400 font-semibold block mt-0.5">Sem {activeStudent.semesters?.number}</span>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-muted/40 border border-border/60">
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase">
+                    Current SGPA
+                  </span>
+                  <p className="text-xl font-black mt-1 font-mono text-foreground">
+                    {activeStudent.sgpa.toFixed(2)}
+                  </p>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-muted/40 border border-border/60">
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase">
+                    Cumulative CGPA
+                  </span>
+                  <p className="text-xl font-black mt-1 font-mono text-foreground">
+                    {activeStudent.cgpa.toFixed(2)}
+                  </p>
+                </div>
+                <div className="p-3.5 rounded-2xl bg-muted/40 border border-border/60">
+                  <span className="text-[10px] font-bold text-muted-foreground uppercase">
+                    Active Backlogs
+                  </span>
+                  <p
+                    className={`text-xl font-black mt-1 font-mono ${
+                      activeStudent.backlogsCount > 0
+                        ? 'text-rose-600 dark:text-rose-400'
+                        : 'text-foreground'
+                    }`}
+                  >
+                    {activeStudent.backlogsCount}
+                  </p>
                 </div>
               </div>
 
-              {/* Term results checklist */}
-              <div className="space-y-2">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Award className="w-4 h-4" /> Term Grades Registry
+              {/* Attendance Risk Warning Alert if < 75% */}
+              {activeStudent.isShortage && (
+                <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="text-xs">
+                    <h4 className="font-bold text-rose-700 dark:text-rose-400">
+                      Attendance Shortage Advisory Notice
+                    </h4>
+                    <p className="text-rose-800 dark:text-rose-300 mt-0.5 leading-relaxed">
+                      Student attendance ({activeStudent.attendancePercentage}%) is currently below the mandatory 75% institutional examination clearance threshold. Recommended for academic counseling and recovery sessions.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Contact Information & Hostel Details */}
+              <div className="space-y-3">
+                <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">
+                  Contact & Campus Details
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div className="p-3 rounded-xl bg-muted/30 border border-border/40 flex items-center gap-3">
+                    <Mail className="w-4 h-4 text-primary shrink-0" />
+                    <span className="truncate">{activeStudent.email}</span>
+                  </div>
+                  <div className="p-3 rounded-xl bg-muted/30 border border-border/40 flex items-center gap-3">
+                    <Phone className="w-4 h-4 text-primary shrink-0" />
+                    <span>{activeStudent.phone}</span>
+                  </div>
+                  <div className="sm:col-span-2 p-3 rounded-xl bg-muted/30 border border-border/40 flex items-center gap-3">
+                    <MapPin className="w-4 h-4 text-primary shrink-0" />
+                    <span>{activeStudent.contactAddress}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Deep Links to Workflows */}
+              <div className="pt-4 border-t border-border/60 flex flex-wrap items-center justify-between gap-3">
+                <span className="text-xs text-muted-foreground">
+                  Quick Actions for {activeStudent.name}:
                 </span>
-                <div className="divide-y divide-slate-100 border border-slate-100 rounded-xl overflow-hidden text-xs">
-                  {studentAcademicDetails?.results?.length === 0 ? (
-                    <div className="p-3 text-slate-400 text-center">No grades uploaded.</div>
-                  ) : (
-                    studentAcademicDetails?.results?.map((res: any) => (
-                      <div key={res.id} className="p-3 bg-white flex items-center justify-between gap-3">
-                        <div className="overflow-hidden">
-                          <span className="font-semibold text-slate-800 block truncate">{res.subjects?.name}</span>
-                          <span className="text-[9px] font-mono text-slate-400 font-bold block">{res.subjects?.code}</span>
-                        </div>
-                        <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 bg-blue-50 text-blue-700 rounded-md shrink-0">
-                          Grade {res.grade}
-                        </span>
-                      </div>
-                    ))
-                  )}
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={`/faculty/leaves?studentId=${activeStudent.id}`}
+                    className="px-3 py-1.5 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted"
+                  >
+                    Check Leaves
+                  </Link>
+                  <Link
+                    href={`/faculty/doubts?studentId=${activeStudent.id}`}
+                    className="px-3 py-1.5 rounded-xl border border-border text-xs font-bold text-foreground hover:bg-muted"
+                  >
+                    View Doubts
+                  </Link>
+                  <Link
+                    href={`/faculty/attendance`}
+                    className="px-3 py-1.5 rounded-xl bg-primary text-primary-foreground text-xs font-bold hover:bg-primary/90"
+                  >
+                    Open Roll Call
+                  </Link>
                 </div>
               </div>
-
-              {/* Leave History list */}
-              <div className="space-y-2">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <CalendarDays className="w-4 h-4" /> Leave Logs
-                </span>
-                <div className="divide-y divide-slate-100 border border-slate-100 rounded-xl overflow-hidden text-xs">
-                  {studentAcademicDetails?.leaves?.length === 0 ? (
-                    <div className="p-3 text-slate-400 text-center">No leave applications.</div>
-                  ) : (
-                    studentAcademicDetails?.leaves?.slice(0, 3).map((leave: any) => (
-                      <div key={leave.id} className="p-3 bg-white flex items-center justify-between gap-3">
-                        <div className="overflow-hidden">
-                          <span className="font-bold text-slate-700 block truncate">{leave.leave_type} Leave</span>
-                          <span className="text-[9px] text-slate-400 block truncate">{leave.reason}</span>
-                        </div>
-                        <span
-                          className={`text-[8.5px] font-bold uppercase px-2 py-0.5 rounded-md shrink-0 ${
-                            leave.status === 'Approved'
-                              ? 'bg-emerald-50 text-emerald-700'
-                              : leave.status === 'Rejected'
-                              ? 'bg-rose-50 text-rose-700'
-                              : 'bg-amber-50 text-amber-700'
-                          }`}
-                        >
-                          {leave.status}
-                        </span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-            </>
-          ) : (
-            <div className="h-full flex flex-col items-center justify-center text-center text-slate-400">
-              <Users className="w-10 h-10 text-slate-300 mb-3" />
-              <p className="text-xs font-semibold">Select a student record</p>
-              <p className="text-[9.5px] mt-1 text-slate-400">Click on any directory row to inspect profile logs.</p>
             </div>
+          ) : (
+            <EmptyState
+              icon={Users}
+              title="Select a Student"
+              description="Choose a student from the list to view their authoritative academic dossier."
+            />
           )}
         </div>
-
       </div>
     </div>
   );

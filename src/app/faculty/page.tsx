@@ -2,227 +2,437 @@
 
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
-import { useAppStore } from '@/lib/store';
-import { motion } from 'framer-motion';
+import { FacultyService } from '@/lib/services/faculty-service';
+import { StatCard } from '@/components/ui/stat-card';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { SkeletonList, SkeletonCard } from '@/components/ui/skeleton';
 import {
   Compass,
-  BookOpen,
-  Users,
+  CalendarCheck,
+  Award,
   HelpCircle,
   CalendarClock,
   FileEdit,
   ArrowRight,
   Clock,
-  PlusCircle,
-  Megaphone,
-  FileUp,
-  Calendar,
+  Users,
+  AlertTriangle,
+  CheckCircle2,
   Sparkles,
+  BookOpen,
+  Calendar,
+  ExternalLink,
 } from 'lucide-react';
 import Link from 'next/link';
 
 export default function FacultyDashboard() {
-  const { faculty } = useAppStore();
-
-  // Fetch Counts
-  const { data: metrics } = useQuery({
-    queryKey: ['faculty-metrics', faculty?.id],
-    queryFn: async () => {
-      // 1. Total Students
-      const { count: studentCount } = await supabase
-        .from('students')
-        .select('*', { count: 'exact', head: true });
-
-      // 2. Pending Doubts
-      const { count: doubtCount } = await supabase
-        .from('doubts')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'Open');
-
-      // 3. Pending Leave Requests
-      const { count: leaveCount } = await supabase
-        .from('leave_requests')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'Pending');
-
-      // 4. Pending Evaluations (Submitted but not Graded)
-      const { count: evaluationCount } = await supabase
-        .from('assignment_submissions')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'Submitted');
-
-      return {
-        students: studentCount || 0,
-        doubts: doubtCount || 0,
-        leaves: leaveCount || 0,
-        evaluations: evaluationCount || 0,
-      };
-    },
-    enabled: !!faculty,
+  const { data: summary, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['faculty-console-summary'],
+    queryFn: () => FacultyService.getConsoleSummary(),
   });
 
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.08,
-      },
-    },
-  };
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <SkeletonCard height={140} />
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <SkeletonCard height={96} />
+          <SkeletonCard height={96} />
+          <SkeletonCard height={96} />
+          <SkeletonCard height={96} />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-4">
+            <SkeletonList count={3} />
+          </div>
+          <div className="space-y-4">
+            <SkeletonList count={2} />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  const itemVariants = {
-    hidden: { opacity: 0, y: 15 },
-    show: { opacity: 1, y: 0, transition: { type: 'spring' as const, stiffness: 260, damping: 25 } },
-  };
+  if (isError || !summary) {
+    return (
+      <ErrorState
+        title="Failed to Load Faculty Console"
+        message={error instanceof Error ? error.message : 'Unable to synchronize faculty schedule and queues.'}
+        onRetry={() => refetch()}
+      />
+    );
+  }
 
-  const schedule = [
-    { time: '09:00 AM - 10:30 AM', title: 'Computer Networks (CS601) - Lecture', type: 'Class', venue: 'CSE Lecture Hall 3', badge: 'bg-indigo-50 text-indigo-700 border-indigo-100' },
-    { time: '11:00 AM - 12:30 PM', title: 'Software Engineering (CS602) - Seminar', type: 'Class', venue: 'CSE Lab 2', badge: 'bg-indigo-50 text-indigo-700 border-indigo-100' },
-    { time: '02:30 PM - 03:30 PM', title: 'Capstone Project Review Sync', type: 'Meeting', venue: 'Faculty Room 102', badge: 'bg-emerald-50 text-emerald-700 border-emerald-100' },
-    { time: '04:00 PM - 05:00 PM', title: 'CSE Department Faculty Meeting', type: 'Meeting', venue: 'Boardroom A', badge: 'bg-amber-50 text-amber-700 border-amber-100' },
-  ];
+  const { faculty, metrics, todaySchedule, attendanceTasks, pendingLeavesSummary, unansweredDoubtsSummary, gradingDeadlines } = summary;
 
   return (
-    <motion.div
-      variants={containerVariants}
-      initial="hidden"
-      animate="show"
-      className="space-y-6 bg-transparent"
-    >
-      {/* 1. HERO SECTION (Welcome Banner with student panel dark theme style) */}
-      <motion.div
-        variants={itemVariants}
-        className="relative bg-gradient-to-r from-indigo-900 via-indigo-955 to-purple-950 p-6 md:p-8 rounded-3xl text-white overflow-hidden border border-indigo-500/20 shadow-md animate-fadeIn"
-      >
-        <div className="absolute inset-0 bg-grid-white/[0.02] pointer-events-none" />
-        <div className="absolute top-[-50%] right-[-10%] w-[50%] h-[200%] bg-indigo-500/10 blur-[100px] rounded-full pointer-events-none" />
-        
+    <div className="space-y-6">
+      {/* 1. HERO BANNER */}
+      <div className="relative rounded-3xl bg-gradient-to-r from-indigo-900 via-indigo-950 to-slate-900 text-white p-6 md:p-8 overflow-hidden shadow-lg border border-indigo-500/20">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="flex items-center gap-4.5">
-            <div className="w-16 h-16 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center font-bold text-xl text-white uppercase shadow-inner shrink-0">
-              {faculty ? `${faculty.first_name[0]}${faculty.last_name[0]}` : 'FC'}
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center font-bold text-xl text-white shadow-inner shrink-0">
+              {faculty.firstName[0]}{faculty.lastName[0]}
             </div>
             <div>
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/10 backdrop-blur-md rounded-full text-[10px] font-bold text-indigo-200 uppercase tracking-widest">
-                <Sparkles className="w-3 h-3 text-indigo-200" /> Operations Center
-              </span>
-              <h2 className="text-2xl md:text-3xl font-bold tracking-tight mt-2.5">
-                Good Morning, Dr. {faculty?.last_name || 'Sharma'}
-              </h2>
-              <p className="text-indigo-200 text-xs md:text-sm mt-1 font-semibold max-w-xl">
-                {faculty?.departments?.name || 'Computer Science Department'} • Academic Year 2025-2026
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/10 backdrop-blur-md rounded-full text-[10px] font-bold text-indigo-200 uppercase tracking-widest">
+                <Sparkles className="w-3 h-3 text-indigo-300" /> Academic Operations Console
+              </div>
+              <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight mt-1">
+                Good Morning, {faculty.name}
+              </h1>
+              <p className="text-indigo-200 text-xs md:text-sm mt-0.5 font-medium">
+                {faculty.department} • Cabin {faculty.cabin} • Session {faculty.academicSession}
               </p>
             </div>
           </div>
 
-          <div className="bg-white/10 backdrop-blur-md border border-white/10 py-2.5 px-4 rounded-2xl flex items-center gap-3 shrink-0 self-start md:self-auto">
-            <div className="w-2.5 h-2.5 bg-emerald-400 rounded-full animate-pulse" />
-            <span className="text-xs font-bold text-indigo-100 font-sans">
-              System Active
-            </span>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link
+              href="/faculty/attendance"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white text-indigo-950 font-bold text-xs shadow-md hover:bg-indigo-50 transition-all hover:scale-[1.02] active:scale-[0.98]"
+            >
+              <CalendarCheck className="w-4 h-4 text-indigo-700" />
+              <span>Launch Roll Call</span>
+            </Link>
+            <Link
+              href="/faculty/exams"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs border border-white/20 backdrop-blur-md transition-all"
+            >
+              <Award className="w-4 h-4" />
+              <span>Marks Entry</span>
+            </Link>
           </div>
         </div>
-      </motion.div>
+      </div>
 
-      {/* 2. QUICK METRICS */}
-      <motion.div
-        variants={itemVariants}
-        className="grid grid-cols-2 lg:grid-cols-6 gap-4.5"
-      >
-        {[
-          { label: 'Assigned Classes', value: '1', icon: Compass, sub: 'BTech CSE Sem 6' },
-          { label: 'Assigned Subjects', value: '2', icon: BookOpen, sub: 'CS601, CS602' },
-          { label: 'Total Students', value: metrics?.students || '1', icon: Users, sub: 'CSE Department' },
-          { label: 'Pending Doubts', value: metrics?.doubts || '0', icon: HelpCircle, sub: 'Needs Reply', highlight: (metrics?.doubts || 0) > 0 ? 'text-amber-700 bg-amber-50' : 'text-slate-500 bg-slate-50', trendColor: (metrics?.doubts || 0) > 0 ? 'text-amber-750 bg-amber-50' : 'text-slate-700 bg-slate-100' },
-          { label: 'Leave Requests', value: metrics?.leaves || '0', icon: CalendarClock, sub: 'Approvals Pending', highlight: (metrics?.leaves || 0) > 0 ? 'text-amber-700 bg-amber-50' : 'text-slate-500 bg-slate-50', trendColor: (metrics?.leaves || 0) > 0 ? 'text-amber-750 bg-amber-50' : 'text-slate-700 bg-slate-100' },
-          { label: 'Pending Grades', value: metrics?.evaluations || '0', icon: FileEdit, sub: 'Submissions Box', highlight: (metrics?.evaluations || 0) > 0 ? 'text-indigo-700 bg-indigo-50' : 'text-slate-500 bg-slate-50', trendColor: (metrics?.evaluations || 0) > 0 ? 'text-indigo-750 bg-indigo-50' : 'text-slate-700 bg-slate-100' },
-        ].map((stat, i) => (
-          <div
-            key={i}
-            className="bg-white/50 backdrop-blur-md border border-slate-200/80 p-5 rounded-2xl hover:border-indigo-400 transition-all duration-300 flex flex-col justify-between shadow-sm"
-          >
-            <div className="flex items-start justify-between">
-              <span className="text-[9.5px] font-semibold uppercase tracking-wider text-slate-500 leading-tight">
-                {stat.label}
-              </span>
-              <div className={`p-1.5 rounded-lg shrink-0 ${stat.highlight || 'text-slate-500 bg-slate-100'}`}>
-                <stat.icon className="w-4 h-4" />
+      {/* 2. KPI METRICS TILES */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Link href="/faculty/attendance" className="block transition-transform hover:scale-[1.01]">
+          <StatCard
+            label="Pending Attendance"
+            value={metrics.pendingAttendanceSessions}
+            icon={CalendarCheck}
+            trend={{
+              value: metrics.pendingAttendanceSessions > 0 ? 'Action required today' : 'Up to date',
+              direction: metrics.pendingAttendanceSessions > 0 ? 'neutral' : 'up',
+            }}
+          />
+        </Link>
+        <Link href="/faculty/leaves" className="block transition-transform hover:scale-[1.01]">
+          <StatCard
+            label="Pending Leaves"
+            value={metrics.pendingLeavesCount}
+            icon={CalendarClock}
+            trend={{
+              value: metrics.pendingLeavesCount > 0 ? `${metrics.pendingLeavesCount} in review queue` : 'Queue cleared',
+              direction: metrics.pendingLeavesCount > 0 ? 'down' : 'up',
+            }}
+          />
+        </Link>
+        <Link href="/faculty/doubts" className="block transition-transform hover:scale-[1.01]">
+          <StatCard
+            label="Unanswered Doubts"
+            value={metrics.unansweredDoubtsCount}
+            icon={HelpCircle}
+            trend={{
+              value: metrics.unansweredDoubtsCount > 0 ? `${metrics.unansweredDoubtsCount} student tickets` : 'All answered',
+              direction: metrics.unansweredDoubtsCount > 0 ? 'down' : 'up',
+            }}
+          />
+        </Link>
+        <Link href="/faculty/students" className="block transition-transform hover:scale-[1.01]">
+          <StatCard
+            label="Scoped Students"
+            value={metrics.totalScopedStudents}
+            icon={Users}
+            trend={{
+              value: 'Assigned CSE Roster',
+              direction: 'neutral',
+            }}
+          />
+        </Link>
+      </div>
+
+      {/* 3. MAIN WORKSPACE GRID */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left Column: Today's Schedule & Attendance Tasks */}
+        <div className="lg:col-span-2 space-y-6">
+          {/* Today's Teaching Schedule */}
+          <div className="p-6 rounded-3xl bg-card border border-border shadow-sm space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-border/60">
+              <div className="flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-primary" />
+                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">
+                  Today's Teaching Schedule & Classes
+                </h2>
               </div>
+              <Link
+                href="/faculty/classes"
+                className="text-xs font-semibold text-primary hover:underline flex items-center gap-1"
+              >
+                Full Timetable <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
             </div>
-            <div className="mt-4">
-              <p className="text-2xl font-bold text-slate-800 tracking-tight">
-                {stat.value}
-              </p>
-              <span className="text-[9.5px] text-slate-400 block font-semibold mt-1 truncate">
-                {stat.sub}
-              </span>
-            </div>
-          </div>
-        ))}
-      </motion.div>
 
-      {/* 3. QUICK ACTIONS GRID */}
-      <motion.div
-        variants={itemVariants}
-        className="grid grid-cols-2 md:grid-cols-5 gap-4"
-      >
-        {[
-          { label: 'Mark Attendance', href: '/faculty/attendance', icon: PlusCircle },
-          { label: 'Upload Grades', href: '/faculty/exams', icon: FileEdit },
-          { label: 'Share Notice', href: '/faculty/announcements', icon: Megaphone },
-          { label: 'Upload Materials', href: '/faculty/notes', icon: FileUp },
-          { label: 'Add Assignment', href: '/faculty/assignments', icon: Sparkles },
-        ].map((act, i) => (
-          <Link key={i} href={act.href}>
-            <div className="flex items-center justify-between p-4 rounded-2xl bg-white/50 backdrop-blur-md border border-slate-200/80 text-xs font-bold shadow-sm hover:border-indigo-400 hover:text-indigo-900 hover:bg-white/30 transition-all duration-300 cursor-pointer group">
-              <div className="flex items-center gap-2.5">
-                <act.icon className="w-5 h-5 shrink-0 text-indigo-600 group-hover:scale-110 transition duration-300" />
-                <span>{act.label}</span>
-              </div>
-              <ArrowRight className="w-4 h-4 opacity-50 shrink-0 group-hover:translate-x-1 transition duration-300" />
-            </div>
-          </Link>
-        ))}
-      </motion.div>
+            {todaySchedule.length === 0 ? (
+              <EmptyState
+                icon={Calendar}
+                title="No Classes Scheduled Today"
+                description="You have no lectures or lab sessions assigned for today's timetable."
+              />
+            ) : (
+              <div className="space-y-3">
+                {todaySchedule.map((item) => (
+                  <div
+                    key={item.id}
+                    className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl border transition-all ${
+                      item.isNext
+                        ? 'bg-primary/5 border-primary/30 shadow-sm ring-1 ring-primary/20'
+                        : 'bg-card hover:bg-muted/30 border-border/70'
+                    }`}
+                  >
+                    <div className="flex items-start sm:items-center gap-3.5">
+                      <div className="w-11 h-11 rounded-xl bg-muted/60 border border-border/60 flex items-center justify-center font-bold text-primary shrink-0">
+                        <Clock className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-sm font-bold text-foreground">
+                            {item.subjectCode} — {item.subjectName}
+                          </h3>
+                          {item.isNext && (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold text-[10px] uppercase">
+                              Upcoming
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {item.time} • {item.sectionName} • {item.room}
+                        </p>
+                      </div>
+                    </div>
 
-      {/* 4. MAIN ACADEMIC SCHEDULE */}
-      <motion.div
-        variants={itemVariants}
-        className="grid grid-cols-1 gap-6"
-      >
-        <div className="bg-white/50 backdrop-blur-md border border-slate-200/80 rounded-3xl p-6 shadow-sm">
-          <div className="flex items-center gap-2 pb-3 border-b border-slate-200 mb-4">
-            <Calendar className="w-4.5 h-4.5 text-indigo-600" />
-            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Today's Academic Schedule</h3>
-          </div>
-
-          <div className="space-y-4">
-            {schedule.map((item, idx) => (
-              <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-white/40 border border-slate-200/60 hover:border-slate-350 hover:bg-white/60 transition duration-300 rounded-2xl">
-                <div className="flex items-center gap-3.5">
-                  <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center shrink-0">
-                    <Clock className="w-5 h-5 text-slate-400" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900">{item.title}</h4>
-                    <div className="flex items-center gap-2 text-[10px] text-slate-500 font-semibold mt-1">
-                      <span>{item.time}</span>
-                      <span>•</span>
-                      <span>{item.venue}</span>
+                    <div className="flex items-center gap-3 self-end sm:self-auto">
+                      <StatusBadge
+                        status={item.status === 'submitted' ? 'active' : 'pending'}
+                        label={item.status === 'submitted' ? 'Marked' : 'Pending Roll Call'}
+                      />
+                      <Link
+                        href={item.deepLink}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-primary text-primary-foreground font-semibold text-xs hover:bg-primary/90 transition-colors shadow-xs"
+                      >
+                        {item.status === 'submitted' ? 'Review / Revise' : 'Take Attendance'}
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </Link>
                     </div>
                   </div>
-                </div>
-
-                <span className={`text-[9.5px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0 border self-start sm:self-auto ${item.badge}`}>
-                  {item.type}
-                </span>
+                ))}
               </div>
-            ))}
+            )}
+          </div>
+
+          {/* Attendance Action Tasks (Deep Link Screen) */}
+          <div className="p-6 rounded-3xl bg-card border border-border shadow-sm space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-border/60">
+              <div className="flex items-center gap-2">
+                <CalendarCheck className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">
+                  Attendance Roll-Call Desk
+                </h2>
+              </div>
+              <span className="text-xs text-muted-foreground">
+                Flagship Speed Screen
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {attendanceTasks.map((task) => (
+                <Link
+                  key={task.sessionId}
+                  href={task.deepLink}
+                  className="group p-4 rounded-2xl border border-border/70 hover:border-primary/50 bg-card hover:bg-muted/20 transition-all flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-xs text-primary">
+                        {task.subjectCode} • {task.sectionName}
+                      </span>
+                      <StatusBadge
+                        status={task.status === 'submitted' ? 'active' : 'pending'}
+                        label={task.status === 'submitted' ? 'Submitted' : 'Pending'}
+                      />
+                    </div>
+                    <h3 className="text-sm font-bold text-foreground mt-2 group-hover:text-primary transition-colors">
+                      {task.subjectName}
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {task.time} • {task.room}
+                    </p>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-border/40 flex items-center justify-between text-xs font-semibold">
+                    <span className="text-muted-foreground">
+                      {task.markedStudents} of {task.totalStudents} Marked
+                    </span>
+                    <span className="text-primary flex items-center gap-1 group-hover:translate-x-1 transition-transform">
+                      Open Roll Call <ArrowRight className="w-3.5 h-3.5" />
+                    </span>
+                  </div>
+                </Link>
+              ))}
+            </div>
           </div>
         </div>
-      </motion.div>
-    </motion.div>
+
+        {/* Right Column: Approvals Queue, Doubts & Deadlines */}
+        <div className="space-y-6">
+          {/* Pending Leaves Queue Summary */}
+          <div className="p-6 rounded-3xl bg-card border border-border shadow-sm space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-border/60">
+              <div className="flex items-center gap-2">
+                <CalendarClock className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">
+                  Leave Approvals
+                </h2>
+              </div>
+              <Link
+                href="/faculty/leaves"
+                className="text-xs font-semibold text-primary hover:underline flex items-center gap-1"
+              >
+                Review All ({pendingLeavesSummary.totalPending})
+              </Link>
+            </div>
+
+            {pendingLeavesSummary.items.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-4 text-center">
+                All student leave applications resolved.
+              </p>
+            ) : (
+              <div className="space-y-2.5">
+                {pendingLeavesSummary.items.map((leave) => (
+                  <Link
+                    key={leave.id}
+                    href={`/faculty/leaves?id=${leave.id}`}
+                    className="block p-3.5 rounded-2xl border border-border/60 hover:border-amber-400/50 bg-card hover:bg-muted/20 transition-all"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-xs font-bold text-foreground">
+                        {leave.studentName} ({leave.rollNo})
+                      </span>
+                      {leave.isUrgent && (
+                        <span className="px-1.5 py-0.5 rounded bg-red-500/10 text-red-600 dark:text-red-400 text-[10px] font-bold">
+                          Risk &lt; 75%
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-1">
+                      {leave.leaveType} • {leave.dates}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground/80 mt-1 italic line-clamp-1">
+                      "{leave.reason}"
+                    </p>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Unanswered Doubts Queue */}
+          <div className="p-6 rounded-3xl bg-card border border-border shadow-sm space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-border/60">
+              <div className="flex items-center gap-2">
+                <HelpCircle className="w-5 h-5 text-sky-600 dark:text-sky-400" />
+                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">
+                  Doubts Inbox
+                </h2>
+              </div>
+              <Link
+                href="/faculty/doubts"
+                className="text-xs font-semibold text-primary hover:underline flex items-center gap-1"
+              >
+                Inbox ({unansweredDoubtsSummary.totalUnanswered})
+              </Link>
+            </div>
+
+            {unansweredDoubtsSummary.items.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-4 text-center">
+                No unanswered doubts pending.
+              </p>
+            ) : (
+              <div className="space-y-2.5">
+                {unansweredDoubtsSummary.items.map((doubt) => (
+                  <Link
+                    key={doubt.id}
+                    href={`/faculty/doubts?id=${doubt.id}`}
+                    className="block p-3.5 rounded-2xl border border-border/60 hover:border-sky-400/50 bg-card hover:bg-muted/20 transition-all"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-xs font-bold text-foreground line-clamp-1">
+                        {doubt.title}
+                      </span>
+                      <span className="text-[10px] font-semibold text-primary/80 shrink-0">
+                        {doubt.subjectCode}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {doubt.studentName} • {doubt.timeAgo}
+                    </p>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Grading Deadlines */}
+          <div className="p-6 rounded-3xl bg-card border border-border shadow-sm space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-border/60">
+              <div className="flex items-center gap-2">
+                <Award className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">
+                  Grading & Deadlines
+                </h2>
+              </div>
+              <Link
+                href="/faculty/exams"
+                className="text-xs font-semibold text-primary hover:underline flex items-center gap-1"
+              >
+                Marks Grid
+              </Link>
+            </div>
+
+            <div className="space-y-2.5">
+              {gradingDeadlines.map((task) => (
+                <Link
+                  key={task.id}
+                  href={`/faculty/exams?assessmentId=${task.id}`}
+                  className="block p-3.5 rounded-2xl border border-border/60 hover:border-emerald-400/50 bg-card hover:bg-muted/20 transition-all"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-xs font-bold text-foreground">
+                      {task.assessmentName}
+                    </span>
+                    <StatusBadge
+                      status={task.status === 'published' ? 'active' : task.status === 'submitted' ? 'pending' : 'draft'}
+                      label={task.status.toUpperCase()}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {task.subjectCode} • {task.sectionName}
+                  </p>
+                  <div className="flex items-center justify-between mt-2 pt-1 border-t border-border/30 text-[11px] text-muted-foreground font-semibold">
+                    <span>Due: {task.dueDate}</span>
+                    <span className="text-primary">{task.pendingEvaluations} pending marks</span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

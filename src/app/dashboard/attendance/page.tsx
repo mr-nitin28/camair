@@ -1,328 +1,307 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
-import { useAppStore } from '@/lib/store';
-import { motion } from 'framer-motion';
+import React, { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import dynamic from 'next/dynamic';
 import {
+  StudentService,
+  type AttendanceHistoryEntry,
+  type AttendanceStatus,
+} from '@/lib/services/student-service';
+import { PageHeader } from '@/components/ui/page-header';
+import { ProgressRing } from '@/components/ui/progress-ring';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { Skeleton, SkeletonChart } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import {
+  CalendarCheck,
   Calendar,
-  CheckCircle,
-  XCircle,
   AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Filter,
+  ArrowRight,
   BookOpen,
-  ArrowLeft,
-  Percent,
 } from 'lucide-react';
 import Link from 'next/link';
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 
-// Mock Data Fallbacks
-const mockSubjects = [
-  { id: 'sub-cd', code: 'CS-601', name: 'Compiler Design', faculty_name: 'Dr. Ramesh Kumar' },
-  { id: 'sub-cn', code: 'CS-602', name: 'Computer Networks', faculty_name: 'Prof. Ananya Sen' },
-  { id: 'sub-se', code: 'CS-603', name: 'Software Engineering', faculty_name: 'Dr. Vikrant Mehta' },
-  { id: 'sub-ai', code: 'CS-604', name: 'Artificial Intelligence', faculty_name: 'Prof. Shruti Roy' },
-  { id: 'sub-wt', code: 'CS-605', name: 'Web Technologies', faculty_name: 'Dr. Amit Bansal' },
-  { id: 'sub-cnl', code: 'CS-606L', name: 'Computer Networks Lab', faculty_name: 'Prof. Ananya Sen' },
-];
+const StudentAttendanceChart = dynamic(
+  () => import('@/components/charts/student-attendance-charts'),
+  {
+    ssr: false,
+    loading: () => <SkeletonChart height={240} />,
+  }
+);
 
-const mockAttendanceLog = [
-  { id: 'log1', date: '2026-06-22', subject_id: 'sub-cd', status: 'Present', subjects: mockSubjects[0] },
-  { id: 'log2', date: '2026-06-22', subject_id: 'sub-cn', status: 'Present', subjects: mockSubjects[1] },
-  { id: 'log3', date: '2026-06-21', subject_id: 'sub-se', status: 'Late', subjects: mockSubjects[2] },
-  { id: 'log4', date: '2026-06-21', subject_id: 'sub-ai', status: 'Present', subjects: mockSubjects[3] },
-  { id: 'log5', date: '2026-06-20', subject_id: 'sub-wt', status: 'Absent', subjects: mockSubjects[4] },
-  { id: 'log6', date: '2026-06-20', subject_id: 'sub-cd', status: 'Present', subjects: mockSubjects[0] },
-  { id: 'log7', date: '2026-06-19', subject_id: 'sub-cn', status: 'Present', subjects: mockSubjects[1] },
-  { id: 'log8', date: '2026-06-19', subject_id: 'sub-se', status: 'Present', subjects: mockSubjects[2] },
-  { id: 'log9', date: '2026-06-18', subject_id: 'sub-ai', status: 'Present', subjects: mockSubjects[3] },
-  { id: 'log10', date: '2026-06-18', subject_id: 'sub-wt', status: 'Present', subjects: mockSubjects[4] },
-  { id: 'log11', date: '2026-06-17', subject_id: 'sub-cnl', status: 'Present', subjects: mockSubjects[5] },
-  { id: 'log12', date: '2026-06-17', subject_id: 'sub-cd', status: 'Present', subjects: mockSubjects[0] },
-  { id: 'log13', date: '2026-06-16', subject_id: 'sub-cn', status: 'Absent', subjects: mockSubjects[1] },
-  { id: 'log14', date: '2026-06-16', subject_id: 'sub-se', status: 'Present', subjects: mockSubjects[2] },
-  { id: 'log15', date: '2026-06-15', subject_id: 'sub-ai', status: 'Present', subjects: mockSubjects[3] },
-  { id: 'log16', date: '2026-06-15', subject_id: 'sub-wt', status: 'Present', subjects: mockSubjects[4] },
-];
-
-const mockMonthlyData = [
-  { name: 'Jan', Percentage: 92 },
+const monthlyAttendanceData = [
+  { name: 'Jan', Percentage: 91 },
   { name: 'Feb', Percentage: 88 },
-  { name: 'Mar', Percentage: 85 },
-  { name: 'Apr', Percentage: 90 },
-  { name: 'May', Percentage: 87 },
+  { name: 'Mar', Percentage: 87.5 },
 ];
 
-interface CustomTooltipProps {
-  active?: boolean;
-  payload?: any[];
-  label?: string;
-}
+export default function StudentAttendancePage() {
+  const [selectedSubjectFilter, setSelectedSubjectFilter] = useState<string>('All');
 
-const CustomChartTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label }) => {
-  if (active && payload && payload.length) {
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ['student-attendance-details'],
+    queryFn: () => StudentService.getAttendanceDetails(),
+    staleTime: 60 * 1000,
+  });
+
+  const filteredLogs = useMemo(() => {
+    if (!data) return [];
+    if (selectedSubjectFilter === 'All') return data.historyLogs;
+    return data.historyLogs.filter(
+      (log) => log.subjectId === selectedSubjectFilter || log.subjectCode === selectedSubjectFilter
+    );
+  }, [data, selectedSubjectFilter]);
+
+  if (isLoading) {
     return (
-      <div className="bg-white border border-slate-200 p-2.5 rounded-xl shadow-xl">
-        <p className="text-[10px] text-slate-500 font-extrabold uppercase tracking-wider">{label}</p>
-        <p className="text-xs text-indigo-600 font-extrabold mt-1">
-          Rate: <span className="text-slate-900">{payload[0].value}%</span>
-        </p>
+      <div className="space-y-6" data-testid="student-attendance-loading">
+        <Skeleton className="h-16 w-full rounded-2xl" />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <Skeleton className="h-64 rounded-2xl" />
+          <Skeleton className="h-64 rounded-2xl lg:col-span-2" />
+        </div>
+        <Skeleton className="h-96 w-full rounded-2xl" />
       </div>
     );
   }
-  return null;
-};
 
-export default function AttendancePage() {
-  const { student } = useAppStore();
-  const [filterSubject, setFilterSubject] = useState('All');
+  if (isError || !data) {
+    return (
+      <div className="py-12">
+        <ErrorState
+          title="Could not load attendance records"
+          message={error instanceof Error ? error.message : 'Failed to retrieve authoritative attendance ledger.'}
+          onRetry={() => refetch()}
+        />
+      </div>
+    );
+  }
 
-  const displaySubjects = mockSubjects;
-  const displayLogs = mockAttendanceLog;
-
-  // Calculate subject-wise attendance percentages
-  const subjectSummaries = useMemo(() => {
-    return displaySubjects.map((sub: any) => {
-      const subLogs = displayLogs.filter((log: any) => log.subject_id === sub.id);
-      const total = subLogs.length > 0 ? subLogs.length : 12;
-      const presentLogs = subLogs.filter((log: any) => log.status === 'Present' || log.status === 'Late');
-      
-      let present = presentLogs.length;
-      if (subLogs.length === 0) {
-        if (sub.code === 'CS-601') present = 11;
-        else if (sub.code === 'CS-602') present = 9;
-        else if (sub.code === 'CS-603') present = 10;
-        else if (sub.code === 'CS-604') present = 8;
-        else if (sub.code === 'CS-605') present = 11;
-        else present = 12;
-      }
-
-      const percentage = Math.round((present / total) * 100);
-      const absent = total - present;
-      const late = subLogs.filter((log: any) => log.status === 'Late').length || (sub.code === 'CS-603' ? 1 : 0);
-
-      return {
-        ...sub,
-        total,
-        present,
-        absent,
-        late,
-        percentage,
-      };
-    });
-  }, [displaySubjects, displayLogs]);
-
-  // Calculate overall attendance
-  const overallStats = useMemo(() => {
-    const total = subjectSummaries.reduce((sum, item) => sum + item.total, 0);
-    const present = subjectSummaries.reduce((sum, item) => sum + item.present, 0);
-    const percentage = Math.round((present / total) * 100);
-    const absent = total - present;
-
-    return { percentage, total, present, absent };
-  }, [subjectSummaries]);
-
-  // Group attendance by month for Recharts Trend
-  const monthlyTrendData = useMemo(() => {
-    const sorted = [...displayLogs].sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    const monthsMap: Record<string, { present: number; total: number }> = {};
-    
-    sorted.forEach((log: any) => {
-      const dateObj = new Date(log.date);
-      const monthName = dateObj.toLocaleString('en-US', { month: 'short' });
-      
-      if (!monthsMap[monthName]) {
-        monthsMap[monthName] = { present: 0, total: 0 };
-      }
-      
-      monthsMap[monthName].total += 1;
-      if (log.status === 'Present' || log.status === 'Late') {
-        monthsMap[monthName].present += 1;
-      }
-    });
-
-    return Object.keys(monthsMap).map((m) => ({
-      name: m,
-      Percentage: Math.round((monthsMap[m].present / monthsMap[m].total) * 100),
-    }));
-  }, [displayLogs]);
-
-  const filteredLogs = useMemo(() => {
-    if (filterSubject === 'All') return displayLogs;
-    return displayLogs.filter((log) => log.subjects?.code === filterSubject);
-  }, [displayLogs, filterSubject]);
+  const { overall, subjects } = data;
 
   return (
-    <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <Link href="/dashboard" className="text-xs text-slate-500 hover:text-indigo-650 font-semibold flex items-center gap-1 mb-2">
-            <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
-          </Link>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Attendance Tracker</h2>
-          <p className="text-slate-600 text-xs mt-1">Monitor subject-wise lectures, overall percentages, and check-in history.</p>
-        </div>
-      </div>
-
-      {/* Stats Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: 'Overall Rate', value: `${overallStats.percentage}%`, icon: Percent, color: 'text-indigo-600 bg-indigo-50 border-indigo-100' },
-          { label: 'Total Conducted', value: overallStats.total, icon: BookOpen, color: 'text-slate-700 bg-slate-100 border-slate-200' },
-          { label: 'Classes Attended', value: overallStats.present, icon: CheckCircle, color: 'text-emerald-700 bg-emerald-50 border-emerald-100' },
-          { label: 'Classes Absent', value: overallStats.absent, icon: XCircle, color: 'text-rose-700 bg-rose-50 border-rose-100' },
-        ].map((item, i) => (
-          <div key={i} className="bg-white border border-slate-200 p-5 rounded-2xl flex items-center gap-4 shadow-sm">
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${item.color}`}>
-              <item.icon className="w-5 h-5" />
-            </div>
-            <div>
-              <span className="text-[9.5px] font-extrabold text-slate-500 uppercase tracking-wider block font-mono">{item.label}</span>
-              <span className="text-2xl font-black text-slate-900 block mt-0.5">{item.value}</span>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Grid: Subject Cards and Monthly Trend Chart */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Subject-Wise Attendance list */}
-        <div className="lg:col-span-2 space-y-4">
-          <h3 className="text-sm font-bold text-slate-800">Subject-wise Summary</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {subjectSummaries.map((sub: any) => {
-              const isBelow = sub.percentage < 75;
-              return (
-                <div key={sub.id} className="bg-white border border-slate-200 p-5 rounded-2xl flex flex-col justify-between hover:border-slate-300 transition shadow-sm">
-                  <div className="space-y-1">
-                    <div className="flex items-start justify-between gap-4">
-                      <span className="text-[10px] font-bold text-indigo-700 font-mono">{sub.code}</span>
-                      {isBelow && (
-                        <span className="flex items-center gap-1 text-[8px] font-extrabold uppercase tracking-wider px-2 py-0.5 bg-rose-50 text-rose-700 rounded-full border border-rose-100 shrink-0">
-                          <AlertTriangle className="w-3 h-3" /> Shortage Alert
-                        </span>
-                      )}
-                    </div>
-                    <h4 className="text-xs font-bold text-slate-900 leading-snug line-clamp-1">{sub.name}</h4>
-                    <p className="text-[10px] text-slate-500 font-bold">{sub.faculty_name}</p>
-                  </div>
-
-                  <div className="mt-5 space-y-2">
-                    <div className="flex justify-between items-baseline text-xs">
-                      <span className={`font-bold ${isBelow ? 'text-rose-600' : 'text-emerald-600'}`}>{sub.percentage}% Rate</span>
-                      <span className="text-[10px] text-slate-500 font-extrabold font-mono">{sub.present}/{sub.total} classes</span>
-                    </div>
-                    <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden border border-slate-200/60">
-                      <div
-                        className={`h-full rounded-full transition-all duration-500 ${isBelow ? 'bg-rose-500' : 'bg-emerald-500'}`}
-                        style={{ width: `${sub.percentage}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Monthly Trend Recharts Card */}
-        <div className="bg-white border border-slate-200 p-5 rounded-2xl flex flex-col justify-between shadow-sm">
-          <div>
-            <h3 className="text-sm font-bold text-slate-800 pb-2 border-b border-slate-200">Monthly Analysis</h3>
-            <p className="text-[10px] text-slate-500 font-bold mt-1">Attendance progression across Semester 6</p>
-          </div>
-
-          <div className="h-52 mt-4 w-full text-[10px] font-mono">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={monthlyTrendData} margin={{ top: 5, right: 10, left: -25, bottom: 5 }}>
-                <defs>
-                  <linearGradient id="areaGlow" x1="0%" y1="0%" x2="0%" y2="100%">
-                    <stop offset="0%" stopColor="#6366f1" stopOpacity={0.2} />
-                    <stop offset="100%" stopColor="#6366f1" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="name" stroke="#64748b" style={{ fontSize: '10px' }} />
-                <YAxis domain={[50, 100]} stroke="#64748b" style={{ fontSize: '10px' }} />
-                <Tooltip content={<CustomChartTooltip />} />
-                <Area type="monotone" dataKey="Percentage" stroke="#6366f1" strokeWidth={2.5} fill="url(#areaGlow)" activeDot={{ r: 5 }} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div className="mt-4 pt-4 border-t border-slate-200 text-center">
-            <span className="text-[9px] text-slate-500 font-extrabold uppercase tracking-wider block">Jan 8, 2026 - May 15, 2026</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Attendance Log Table */}
-      <div className="bg-white border border-slate-200 rounded-3xl shadow-sm overflow-hidden">
-        <div className="p-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h3 className="text-sm font-bold text-slate-800">Detailed Check-In Logs</h3>
-            <p className="text-[10px] text-slate-500 font-bold mt-0.5">Chronological record of recent lecture attendance status.</p>
-          </div>
-
-          {/* Subject code filter selector */}
-          <select
-            value={filterSubject}
-            onChange={(e) => setFilterSubject(e.target.value)}
-            className="bg-white border border-slate-200 text-slate-700 rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:border-indigo-500 cursor-pointer font-semibold shadow-sm"
+    <div className="space-y-6" data-testid="student-attendance">
+      {/* Header */}
+      <PageHeader
+        title="Attendance & Session Roster"
+        description="Comprehensive attendance tracking with regulatory 75% threshold enforcement"
+        badge={<StatusBadge label="Semester 6 • 2025-2026" variant="info" size="sm" />}
+        actions={
+          <Link
+            href="/dashboard/leaves"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-[var(--surface)] hover:bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)] transition shadow-sm"
           >
-            <option value="All">All Subjects</option>
-            {displaySubjects.map((sub: any) => (
-              <option key={sub.id} value={sub.code}>{sub.code} - {sub.name}</option>
-            ))}
-          </select>
+            <Calendar className="w-3.5 h-3.5 text-[var(--accent)]" />
+            <span>Apply For Medical Leave</span>
+          </Link>
+        }
+      />
+
+      {/* Overview Grid: Ring + Monthly Chart */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Ring Card */}
+        <div className="p-5 md:p-6 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between pb-3 border-b border-[var(--border)]">
+              <div>
+                <h3 className="text-sm font-bold text-[var(--text)]">Institutional Standing</h3>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">Threshold: 75.00%</p>
+              </div>
+              <StatusBadge
+                label={overall.isShortage ? 'Shortage Alert' : 'Eligible for Exams'}
+                variant={overall.isShortage ? 'danger' : 'success'}
+                size="sm"
+              />
+            </div>
+
+            <div className="my-5 flex flex-col items-center justify-center">
+              <ProgressRing
+                value={overall.percentage}
+                size={130}
+                strokeWidth={11}
+                threshold={75}
+                label="Overall Attendance"
+              />
+              <p className="text-xs text-center mt-3 font-semibold text-[var(--text-muted)]">
+                {overall.attendedSessions} attended / {overall.totalSessions} sessions logged
+              </p>
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl bg-[var(--surface-2)]/60 text-xs">
+            {overall.isShortage ? (
+              <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400 font-bold">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>Must attend {overall.classesNeededToRecover} consecutive classes to restore threshold.</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-bold">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>Buffer available: can miss up to {overall.classesAllowedToMiss} classes.</span>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-extrabold text-[9.5px] font-mono">
-                <th className="p-4">Date</th>
-                <th className="p-4">Subject Code</th>
-                <th className="p-4">Subject Name</th>
-                <th className="p-4">Faculty</th>
-                <th className="p-4">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200/85">
-              {filteredLogs.slice(0, 15).map((log: any) => (
-                <tr key={log.id} className="hover:bg-slate-50 transition">
-                  <td className="p-4 font-bold text-slate-700 font-mono">
-                    {new Date(log.date).toLocaleDateString(undefined, {
-                      weekday: 'short',
-                      month: 'short',
-                      day: 'numeric',
-                      year: 'numeric',
-                    })}
-                  </td>
-                  <td className="p-4 font-mono font-bold text-indigo-700">{log.subjects?.code}</td>
-                  <td className="p-4 font-semibold text-slate-800">{log.subjects?.name}</td>
-                  <td className="p-4 text-slate-600 font-semibold">{log.subjects?.faculty_name}</td>
-                  <td className="p-4">
+        {/* Dynamic Progression Chart */}
+        <div className="lg:col-span-2">
+          <StudentAttendanceChart data={monthlyAttendanceData} />
+        </div>
+      </div>
+
+      {/* Subject-Wise Summary Cards */}
+      <div className="space-y-3">
+        <h3 className="text-sm font-bold text-[var(--text)]">Subject Attendance Breakdown</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {subjects.map((sub) => {
+            const isShort = sub.metrics.isShortage;
+            return (
+              <div
+                key={sub.subjectId}
+                className={`p-4 rounded-2xl border transition-all ${
+                  isShort
+                    ? 'border-rose-300 dark:border-rose-900/60 bg-rose-50/30 dark:bg-rose-950/20'
+                    : 'border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)]/40 shadow-sm'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-mono font-extrabold text-[var(--accent)]">
+                      {sub.subjectCode} • {sub.credits} Credits
+                    </span>
+                    <h4 className="text-xs font-bold text-[var(--text)] truncate mt-0.5">
+                      {sub.subjectName}
+                    </h4>
+                    <span className="text-[11px] text-[var(--text-muted)] block mt-0.5 truncate">
+                      {sub.facultyName}
+                    </span>
+                  </div>
+                  <div className="text-right shrink-0">
                     <span
-                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-extrabold uppercase text-[9px] border ${
-                        log.status === 'Present'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                          : log.status === 'Absent'
-                          ? 'bg-rose-50 text-rose-700 border-rose-100'
-                          : 'bg-amber-50 text-amber-700 border-amber-100'
+                      className={`text-base font-black tabular-nums ${
+                        isShort ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'
                       }`}
                     >
-                      {log.status === 'Present' && <CheckCircle className="w-3 h-3 shrink-0" />}
-                      {log.status === 'Absent' && <XCircle className="w-3 h-3 shrink-0" />}
-                      {log.status}
+                      {sub.metrics.percentage.toFixed(0)}%
                     </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                </div>
+
+                <div className="mt-3 pt-2.5 border-t border-[var(--border)]/60 flex items-center justify-between text-[11px] text-[var(--text-muted)] font-mono">
+                  <span>Present: {sub.metrics.attendedSessions}</span>
+                  <span>Absent: {sub.metrics.absentSessions}</span>
+                  <span>Total: {sub.metrics.totalSessions}</span>
+                </div>
+              </div>
+            );
+          })}
         </div>
+      </div>
+
+      {/* Detailed Session-by-Session History Log */}
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm overflow-hidden">
+        <div className="p-4 md:p-5 border-b border-[var(--border)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h3 className="text-sm font-bold text-[var(--text)]">
+              Daily Session Attendance History
+            </h3>
+            <p className="text-xs text-[var(--text-muted)] mt-0.5">
+              Auditable session roll-call logs submitted by assigned faculty
+            </p>
+          </div>
+
+          {/* Subject Filter */}
+          <div className="flex items-center gap-2">
+            <Filter className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+            <select
+              value={selectedSubjectFilter}
+              onChange={(e) => setSelectedSubjectFilter(e.target.value)}
+              className="text-xs py-1.5 px-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] font-semibold focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            >
+              <option value="All">All Subjects</option>
+              {subjects.map((s) => (
+                <option key={s.subjectId} value={s.subjectId}>
+                  {s.subjectCode} - {s.subjectName}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {filteredLogs.length === 0 ? (
+          <EmptyState
+            title="No session records"
+            description="No attendance logs found matching the selected filter."
+            className="py-12 border-none"
+          />
+        ) : (
+          <div className="overflow-x-auto custom-scrollbar">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-[var(--surface-2)]/60 text-[var(--text-muted)] border-b border-[var(--border)] font-bold uppercase tracking-wider text-[10px]">
+                  <th className="py-3 px-4">Date</th>
+                  <th className="py-3 px-4">Slot</th>
+                  <th className="py-3 px-4">Subject</th>
+                  <th className="py-3 px-4">Assigned Faculty</th>
+                  <th className="py-3 px-4 text-right">Attendance Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--border)] font-medium">
+                {filteredLogs.map((log) => {
+                  let badgeVariant: 'success' | 'danger' | 'warning' | 'info' = 'success';
+                  if (log.status === 'Absent') badgeVariant = 'danger';
+                  else if (log.status === 'Late') badgeVariant = 'warning';
+                  else if (log.status === 'Excused') badgeVariant = 'info';
+
+                  return (
+                    <tr
+                      key={log.id}
+                      className="hover:bg-[var(--surface-2)]/40 transition-colors"
+                    >
+                      <td className="py-3 px-4 font-mono font-semibold text-[var(--text)]">
+                        {new Date(log.date).toLocaleDateString(undefined, {
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </td>
+                      <td className="py-3 px-4 font-mono text-[var(--text-muted)]">
+                        Slot {log.slotNumber}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="font-mono font-bold text-[var(--accent)] mr-1.5">
+                          {log.subjectCode}
+                        </span>
+                        <span className="text-[var(--text)] font-semibold">{log.subjectName}</span>
+                      </td>
+                      <td className="py-3 px-4 text-[var(--text-muted)]">
+                        {log.facultyName}
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <StatusBadge
+                          label={log.status}
+                          variant={badgeVariant}
+                          size="sm"
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

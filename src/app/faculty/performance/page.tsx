@@ -13,7 +13,16 @@ import {
   Search,
 } from 'lucide-react';
 import Link from 'next/link';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from 'recharts';
+import dynamic from 'next/dynamic';
+import { SkeletonChart } from '@/components/ui/skeleton';
+
+const FacultyPerformanceChart = dynamic(
+  () => import('@/components/charts/faculty-performance-charts'),
+  {
+    ssr: false,
+    loading: () => <SkeletonChart height={224} />,
+  }
+);
 
 export default function FacultyPerformancePage() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -114,30 +123,8 @@ export default function FacultyPerformancePage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Risk Distribution Bar Chart */}
-        <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm lg:col-span-2 flex flex-col justify-between">
-          <div>
-            <h3 className="text-sm font-bold text-slate-950 flex items-center gap-2">
-              <TrendingUp className="w-4.5 h-4.5 text-blue-600" />
-              Risk Roster Classification
-            </h3>
-            <p className="text-[10px] text-slate-400 font-semibold mt-1">Student distribution across risk categories</p>
-          </div>
-
-          <div className="h-56 mt-4 w-full text-xs">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                <XAxis dataKey="name" stroke="#94a3b8" />
-                <YAxis stroke="#94a3b8" />
-                <Tooltip />
-                <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                  {chartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+        <div className="lg:col-span-2">
+          <FacultyPerformanceChart data={chartData} />
         </div>
 
         {/* Risk Criteria guidelines */}

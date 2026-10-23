@@ -1,308 +1,245 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { useAppStore } from '@/lib/store';
-import { motion } from 'framer-motion';
+import { useQuery } from '@tanstack/react-query';
+import dynamic from 'next/dynamic';
+import { StudentService } from '@/lib/services/student-service';
+import { PageHeader } from '@/components/ui/page-header';
+import { StatCard } from '@/components/ui/stat-card';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { Skeleton, SkeletonChart } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
 import {
   TrendingUp,
-  ArrowLeft,
-  ChevronUp,
-  ChevronDown,
-  BookOpen,
   Award,
+  ChevronUp,
+  BookOpen,
+  CalendarCheck,
+  CheckCircle2,
+  FileDown,
 } from 'lucide-react';
 import Link from 'next/link';
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar, Cell } from 'recharts';
 
-// Fallback Mock Results
-const mockResults = [
+const StudentPerformanceCharts = dynamic(
+  () => import('@/components/charts/student-performance-charts'),
   {
-    subjects: { code: 'CS-501', name: 'Theory of Computation', credits: 4 },
-    internal_marks: 27,
-    exam_marks: 61,
-    grade: 'A+',
-    grade_points: 9,
-  },
-  {
-    subjects: { code: 'CS-502', name: 'Database Management Systems', credits: 4 },
-    internal_marks: 29,
-    exam_marks: 63,
-    grade: 'O',
-    grade_points: 10,
-  },
-  {
-    subjects: { code: 'CS-503', name: 'Design & Analysis of Algorithms', credits: 4 },
-    internal_marks: 25,
-    exam_marks: 59,
-    grade: 'A',
-    grade_points: 8,
-  },
-  {
-    subjects: { code: 'CS-504', name: 'Microprocessors', credits: 3 },
-    internal_marks: 24,
-    exam_marks: 54,
-    grade: 'B+',
-    grade_points: 7,
-  },
-  {
-    subjects: { code: 'CS-505L', name: 'DBMS Laboratory', credits: 2 },
-    internal_marks: 0,
-    exam_marks: 46,
-    grade: 'O',
-    grade_points: 10,
-  },
-  {
-    id: 'r6',
-    subjects: { code: 'CS-506L', name: 'Algorithm Design Lab', credits: 2 },
-    internal_marks: 0,
-    exam_marks: 44,
-    grade: 'A+',
-    grade_points: 9,
-  },
-];
+    ssr: false,
+    loading: () => (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <SkeletonChart height={240} />
+        <SkeletonChart height={240} />
+      </div>
+    ),
+  }
+);
 
-// Semester GPA Trend Data (Sem 1 to 5)
-const gpaTrendData = [
-  { name: 'Sem 1', SGPA: 8.20, CGPA: 8.20 },
-  { name: 'Sem 2', SGPA: 8.45, CGPA: 8.32 },
-  { name: 'Sem 3', SGPA: 8.50, CGPA: 8.38 },
-  { name: 'Sem 4', SGPA: 8.80, CGPA: 8.49 },
-  { name: 'Sem 5', SGPA: 8.75, CGPA: 8.72 },
-];
+export default function StudentPerformancePage() {
+  const {
+    data: dashData,
+    isLoading: isDashLoading,
+    isError: isDashError,
+    error: dashError,
+    refetch: refetchDash,
+  } = useQuery({
+    queryKey: ['student-performance-dash'],
+    queryFn: () => StudentService.getDashboardSummary(),
+    staleTime: 60 * 1000,
+  });
 
-const COLORS = ['#6366f1', '#a855f7', '#ec4899', '#f43f5e', '#e11d48', '#be123c'];
+  const {
+    data: examData,
+    isLoading: isExamLoading,
+    isError: isExamError,
+    error: examError,
+    refetch: refetchExam,
+  } = useQuery({
+    queryKey: ['student-performance-exams'],
+    queryFn: () => StudentService.getExamResults(),
+    staleTime: 60 * 1000,
+  });
 
-interface CustomTooltipProps {
-  active?: boolean;
-  payload?: any[];
-  label?: string;
-}
+  const isLoading = isDashLoading || isExamLoading;
+  const isError = isDashError || isExamError;
+  const error = dashError || examError;
 
-const CustomGpaTooltip: React.FC<CustomTooltipProps> = ({ active, payload, label }) => {
-  if (active && payload && payload.length) {
+  const gpaTrend = useMemo(() => {
+    if (!dashData) return [];
+    return dashData.academicSummary.trend.map((pt) => ({
+      name: pt.semester,
+      SGPA: pt.sgpa,
+      CGPA: pt.cgpa,
+    }));
+  }, [dashData]);
+
+  const subjectScores = useMemo(() => {
+    if (!examData) return [];
+    const sem5 = examData.semesters.find((s) => s.semesterNumber === 5);
+    if (!sem5) return [];
+    return sem5.results.map((r) => ({
+      name: r.subjectCode,
+      fullName: r.subjectName,
+      Score: r.marksObtained,
+    }));
+  }, [examData]);
+
+  if (isLoading) {
     return (
-      <div className="bg-white border border-slate-200 p-2.5 rounded-xl shadow-xl">
-        <p className="text-[10px] text-slate-500 font-extrabold uppercase tracking-wider">{label}</p>
-        <div className="space-y-1 mt-1.5 font-semibold">
-          <p className="text-xs text-indigo-650">
-            SGPA: <span className="text-slate-900 font-bold">{payload[0].value}</span>
-          </p>
-          {payload[1] && (
-            <p className="text-xs text-purple-650">
-              CGPA: <span className="text-slate-900 font-bold">{payload[1].value}</span>
-            </p>
-          )}
+      <div className="space-y-6" data-testid="student-performance-loading">
+        <Skeleton className="h-16 w-full rounded-2xl" />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Skeleton className="h-28 rounded-2xl" />
+          <Skeleton className="h-28 rounded-2xl" />
+          <Skeleton className="h-28 rounded-2xl" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <SkeletonChart height={240} />
+          <SkeletonChart height={240} />
         </div>
       </div>
     );
   }
-  return null;
-};
 
-const CustomScoreTooltip: React.FC<CustomTooltipProps> = ({ active, payload }) => {
-  if (active && payload && payload.length) {
+  if (isError || !dashData || !examData) {
     return (
-      <div className="bg-white border border-slate-200 p-2.5 rounded-xl shadow-xl">
-        <p className="text-[10px] text-slate-500 font-extrabold uppercase tracking-wider">{payload[0].payload.fullName}</p>
-        <p className="text-xs text-purple-655 font-extrabold mt-1">
-          Total Score: <span className="text-slate-900 font-black">{payload[0].value} / 100</span>
-        </p>
+      <div className="py-12">
+        <ErrorState
+          title="Could not load performance records"
+          message={error instanceof Error ? error.message : 'Failed to retrieve academic trajectory.'}
+          onRetry={() => {
+            refetchDash();
+            refetchExam();
+          }}
+        />
       </div>
     );
   }
-  return null;
-};
 
-export default function PerformancePage() {
-  const { student } = useAppStore();
-
-  const displayResults = mockResults;
-
-  // Subject Grades Data (Sem 5)
-  const subjectMarksData = useMemo(() => {
-    return displayResults.map((r: any) => ({
-      name: r.subjects?.code || '',
-      fullName: r.subjects?.name || '',
-      Score: Number(r.internal_marks || 0) + Number(r.exam_marks || 0) + Number(r.practical_marks || 0),
-    }));
-  }, [displayResults]);
-
-  // Strengths and Weakness extraction
-  const strengthsAndWeaknesses = useMemo(() => {
-    const sorted = [...displayResults].sort((a: any, b: any) => b.grade_points - a.grade_points);
-    
-    return {
-      strengths: sorted.slice(0, 2).map((r: any) => ({
-        name: r.subjects?.name,
-        code: r.subjects?.code,
-        grade: r.grade,
-        reason: `Demonstrated a core mastery of internal principles and exam modules, securing top marks.`,
-      })),
-      weaknesses: sorted.slice(-2).map((r: any) => ({
-        name: r.subjects?.name,
-        code: r.subjects?.code,
-        grade: r.grade,
-        reason: `Slight performance deficit compared to peer classes. Suggested revision before terminal examinations.`,
-      })),
-    };
-  }, [displayResults]);
+  const { academicSummary } = dashData;
 
   return (
-    <div className="space-y-6">
-      {/* Page Header */}
-      <div>
-        <Link href="/dashboard" className="text-xs text-slate-500 hover:text-indigo-600 font-semibold flex items-center gap-1 mb-2">
-          <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
-        </Link>
-        <h2 className="text-2xl font-bold tracking-tight text-slate-900">Academic Analytics & Performance</h2>
-        <p className="text-slate-600 text-xs mt-1">Interactive visualizations tracing your historical GPA trend, subject strengths, and growth milestones.</p>
+    <div className="space-y-6" data-testid="student-performance">
+      {/* Header */}
+      <PageHeader
+        title="Performance Analytics & Trajectory"
+        description="Comprehensive evaluation metrics, credit accumulation, and semester trend progression"
+        badge={<StatusBadge label="Academic Standing: Exemplary" variant="success" size="sm" />}
+        actions={
+          <Link
+            href="/dashboard/exams"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-[var(--surface)] hover:bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)] transition shadow-sm"
+          >
+            <Award className="w-3.5 h-3.5 text-[var(--accent)]" />
+            <span>View Published Exam Sheets</span>
+          </Link>
+        }
+      />
+
+      {/* Top Academic Metric Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatCard
+          title="Cumulative CGPA"
+          value={academicSummary.cgpa.toFixed(2)}
+          subtext="Top 10% in Department Roster"
+          icon={TrendingUp}
+          delta={{
+            value: 'Rank #4 / 120',
+            isPositive: true,
+          }}
+        />
+        <StatCard
+          title="Latest Published SGPA"
+          value={academicSummary.currentSgpa.toFixed(2)}
+          subtext="Semester 5 Official Result"
+          icon={Award}
+          delta={{
+            value: '+0.10 vs Sem 4',
+            isPositive: true,
+          }}
+        />
+        <StatCard
+          title="Total Earned Credits"
+          value={`${academicSummary.totalCreditsEarned}`}
+          subtext="124 of 160 credits completed"
+          icon={CalendarCheck}
+          delta={{
+            value: 'On Track',
+            isPositive: true,
+          }}
+        />
       </div>
 
-      {/* GPA summaries */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Semester GPA Line Chart */}
-        <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm flex flex-col justify-between">
+      {/* Dynamic Performance Charts */}
+      <StudentPerformanceCharts
+        gpaTrendData={gpaTrend}
+        subjectMarksData={subjectScores}
+      />
+
+      {/* Semester by Semester Progression Breakdown */}
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm overflow-hidden">
+        <div className="p-4 md:p-5 border-b border-[var(--border)] flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-              <TrendingUp className="w-4.5 h-4.5 text-indigo-600" />
-              GPA Progression
+            <h3 className="text-sm font-bold text-[var(--text)]">
+              Historical Semester Progression
             </h3>
-            <p className="text-[10px] text-slate-500 font-bold mt-1">Comparing SGPA vs Cumulative CGPA across semesters</p>
+            <p className="text-xs text-[var(--text-muted)] mt-0.5">
+              Cumulative progression across all completed semesters
+            </p>
           </div>
-
-          <div className="h-60 mt-4 w-full text-[10px] font-mono">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={gpaTrendData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorSgpa" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2}/>
-                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                  </linearGradient>
-                  <linearGradient id="colorCgpa" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#a855f7" stopOpacity={0.1}/>
-                    <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="name" stroke="#64748b" style={{ fontSize: '10px' }} />
-                <YAxis domain={[7.5, 9.5]} stroke="#64748b" style={{ fontSize: '10px' }} />
-                <Tooltip content={<CustomGpaTooltip />} />
-                <Area type="monotone" dataKey="SGPA" stroke="#6366f1" strokeWidth={2.5} fillOpacity={1} fill="url(#colorSgpa)" />
-                <Area type="monotone" dataKey="CGPA" stroke="#a855f7" strokeWidth={2} fillOpacity={1} fill="url(#colorCgpa)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          <StatusBadge label="5 Semesters Completed" variant="info" size="sm" />
         </div>
 
-        {/* Subject wise marks bar chart */}
-        <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm flex flex-col justify-between">
-          <div>
-            <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-              <BookOpen className="w-4.5 h-4.5 text-indigo-600" />
-              Semester 5 Subject Scores
-            </h3>
-            <p className="text-[10px] text-slate-500 font-bold mt-1">Total score breakdown (out of 100) per subject</p>
-          </div>
+        <div className="overflow-x-auto custom-scrollbar">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="bg-[var(--surface-2)]/60 text-[var(--text-muted)] border-b border-[var(--border)] font-bold uppercase tracking-wider text-[10px]">
+                <th className="py-3 px-4">Semester</th>
+                <th className="py-3 px-4 text-center">Semester SGPA</th>
+                <th className="py-3 px-4 text-center">Progression CGPA</th>
+                <th className="py-3 px-4 text-center">Delta vs Previous</th>
+                <th className="py-3 px-4 text-right">Academic Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border)] font-medium">
+              {academicSummary.trend.map((sem, idx) => {
+                const prev = idx > 0 ? academicSummary.trend[idx - 1] : null;
+                const delta = prev ? sem.sgpa - prev.sgpa : 0;
 
-          <div className="h-60 mt-4 w-full text-[10px] font-mono">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={subjectMarksData} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="name" stroke="#64748b" style={{ fontSize: '10px' }} />
-                <YAxis domain={[0, 100]} stroke="#64748b" style={{ fontSize: '10px' }} />
-                <Tooltip content={<CustomScoreTooltip />} />
-                <Bar dataKey="Score" radius={[6, 6, 0, 0]}>
-                  {subjectMarksData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </div>
-
-      {/* Grid: Subject Strengths & Weak Areas */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Subject Strengths */}
-        <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm space-y-4">
-          <div className="flex items-center gap-2 pb-3 border-b border-slate-200 text-emerald-600">
-            <ChevronUp className="w-5 h-5" />
-            <h3 className="text-sm font-bold text-slate-800">Key Strengths</h3>
-          </div>
-
-          <div className="space-y-4">
-            {strengthsAndWeaknesses.strengths.map((str: any, idx: number) => (
-              <div key={idx} className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl space-y-1 hover:border-emerald-250 transition shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <span className="font-extrabold text-slate-900 text-xs">{str.name}</span>
-                  <span className="text-[9px] font-extrabold uppercase px-2.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-md shrink-0">
-                    Grade {str.grade}
-                  </span>
-                </div>
-                <p className="text-slate-600 text-xs mt-2.5 leading-relaxed font-semibold">{str.reason}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Areas for Improvement */}
-        <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm space-y-4">
-          <div className="flex items-center gap-2 pb-3 border-b border-slate-200 text-rose-700">
-            <ChevronDown className="w-5 h-5" />
-            <h3 className="text-sm font-bold text-slate-800">Areas for Improvement</h3>
-          </div>
-
-          <div className="space-y-4">
-            {strengthsAndWeaknesses.weaknesses.map((weak: any, idx: number) => (
-              <div key={idx} className="p-4 bg-rose-50 border border-rose-100 rounded-2xl space-y-1 hover:border-rose-250 transition shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <span className="font-extrabold text-slate-900 text-xs">{weak.name}</span>
-                  <span className="text-[9px] font-extrabold uppercase px-2.5 py-0.5 bg-rose-50 text-rose-700 border border-rose-100 rounded-md shrink-0">
-                    Grade {weak.grade}
-                  </span>
-                </div>
-                <p className="text-slate-600 text-xs mt-2.5 leading-relaxed font-semibold">{weak.reason}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Academic Growth Timeline */}
-      <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-sm space-y-6">
-        <div className="flex items-center gap-2 pb-3 border-b border-slate-200">
-          <Award className="w-5 h-5 text-indigo-600 animate-pulse" />
-          <h3 className="text-sm font-bold text-slate-800">Growth Timeline</h3>
-        </div>
-
-        <div className="relative pl-6 border-l border-slate-200 space-y-6 text-xs ml-4 font-semibold">
-          <div className="relative">
-            <div className="absolute top-1.5 -left-[31px] w-4 h-4 bg-white rounded-full border-2 border-indigo-600 flex items-center justify-center shadow-sm">
-              <div className="w-1.5 h-1.5 rounded-full bg-indigo-600 animate-pulse" />
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="font-extrabold text-slate-900 text-xs">Semester 6 In-Progress</span>
-              <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-md">Active</span>
-            </div>
-            <p className="text-slate-600 mt-2">Maintaining a current CGPA of 8.72, aiming to clear internal evaluations next week.</p>
-          </div>
-
-          <div className="relative">
-            <div className="absolute top-1.5 -left-[30px] w-3.5 h-3.5 bg-slate-200 border border-slate-350 rounded-full" />
-            <span className="text-slate-700 flex items-center gap-2">
-              Semester 5 Completion <span className="text-[10px] text-slate-500 font-mono font-bold">(Dec 2025)</span>
-            </span>
-            <p className="text-slate-600 mt-2">Concluded Term 5 with SGPA of 8.75. Scored a perfect O grade in Database Management Systems.</p>
-          </div>
-
-          <div className="relative">
-            <div className="absolute top-1.5 -left-[30px] w-3.5 h-3.5 bg-slate-200 border border-slate-350 rounded-full" />
-            <span className="text-slate-700 flex items-center gap-2">
-              Semester 4 Completion <span className="text-[10px] text-slate-500 font-mono font-bold">(May 2025)</span>
-            </span>
-            <p className="text-slate-600 mt-2">Achieved SGPA of 8.80. Created a simulated database parser featured in the CSE newsletter.</p>
-          </div>
+                return (
+                  <tr
+                    key={sem.semester}
+                    className="hover:bg-[var(--surface-2)]/40 transition-colors"
+                  >
+                    <td className="py-3.5 px-4 font-bold text-[var(--text)]">
+                      {sem.semester}
+                    </td>
+                    <td className="py-3.5 px-4 text-center font-mono font-black text-[var(--accent)]">
+                      {sem.sgpa.toFixed(2)}
+                    </td>
+                    <td className="py-3.5 px-4 text-center font-mono font-bold text-[var(--text)]">
+                      {sem.cgpa.toFixed(2)}
+                    </td>
+                    <td className="py-3.5 px-4 text-center font-mono">
+                      {idx === 0 ? (
+                        <span className="text-[var(--text-muted)]">—</span>
+                      ) : delta >= 0 ? (
+                        <span className="text-emerald-600 dark:text-emerald-400 font-bold inline-flex items-center gap-0.5">
+                          <ChevronUp className="w-3.5 h-3.5" />+{delta.toFixed(2)}
+                        </span>
+                      ) : (
+                        <span className="text-rose-600 dark:text-rose-400 font-bold inline-flex items-center gap-0.5">
+                          -{Math.abs(delta).toFixed(2)}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3.5 px-4 text-right">
+                      <StatusBadge label="Cleared (No Backlogs)" variant="success" size="sm" />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>

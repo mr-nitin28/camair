@@ -1,547 +1,725 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
-import { useAppStore } from '@/lib/store';
-import { motion, AnimatePresence } from 'framer-motion';
+import {
+  AdminService,
+  type FacultyRegistryItem,
+  type BulkImportResult,
+  type FacultyImportRecord,
+} from '@/lib/services/admin-service';
+import { PageHeader } from '@/components/ui/page-header';
+import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { Dialog } from '@/components/ui/dialog';
+import { StatusBadge } from '@/components/ui/status-badge';
 import {
   GraduationCap,
   Search,
   Plus,
-  ArrowLeft,
-  Trash2,
-  Phone,
-  Mail,
-  BookOpen,
-  CalendarCheck,
+  FileSpreadsheet,
   CheckCircle,
   AlertTriangle,
-  Loader2,
+  XCircle,
+  Mail,
+  Building,
+  RefreshCw,
+  PowerOff,
+  UserCheck,
+  Phone,
+  Briefcase,
+  Layers,
+  Edit3,
 } from 'lucide-react';
-import Link from 'next/link';
 
-interface FacultyMember {
-  id: string;
-  faculty_id: string;
-  first_name: string;
-  last_name: string;
-  email: string;
-  phone: string | null;
-  department_id: string;
-  created_at: string;
-  departments?: { name: string; code: string };
-}
+const sampleFacultyValidCsv = `faculty_id,first_name,last_name,email,department_code,designation,cabin
+FAC-CS-004,Pooja,Iyer,pooja.iyer@campusos.dev,CSE,Associate Professor,Room 305 Block A
+FAC-EC-002,Manish,Tiwari,manish.tiwari@campusos.dev,ECE,Assistant Professor,Room 203 Block B`;
 
 export default function FacultyRegistryPage() {
-  const { admin } = useAppStore();
   const queryClient = useQueryClient();
 
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedFacultyId, setSelectedFacultyId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [departmentCode, setDepartmentCode] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
 
-  // Form states
-  const [isEnrollOpen, setIsEnrollOpen] = useState(false);
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [email, setEmail] = useState('');
-  const [facultyIdInput, setFacultyIdInput] = useState('');
-  const [phoneInput, setPhoneInput] = useState('');
-  const [deptId, setDeptId] = useState('');
+  // Create Faculty Modal
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [newFacultyId, setNewFacultyId] = useState('');
+  const [newFirstName, setNewFirstName] = useState('');
+  const [newLastName, setNewLastName] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [newDept, setNewDept] = useState('CSE');
+  const [newDesignation, setNewDesignation] = useState('Assistant Professor');
+  const [newCabin, setNewCabin] = useState('Room 301, Block A');
+  const [createError, setCreateError] = useState<string | null>(null);
 
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Edit Faculty Modal
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editingFaculty, setEditingFaculty] = useState<FacultyRegistryItem | null>(null);
+  const [editFirstName, setEditFirstName] = useState('');
+  const [editLastName, setEditLastName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editDept, setEditDept] = useState('CSE');
+  const [editDesignation, setEditDesignation] = useState('Assistant Professor');
+  const [editCabin, setEditCabin] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
 
-  // Fetch departments
-  const { data: departments } = useQuery({
-    queryKey: ['admin-depts-lookup'],
-    queryFn: async () => {
-      const { data } = await supabase.from('departments').select('*');
-      return data || [];
-    },
+  // Bulk Import Modal
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [csvContent, setCsvContent] = useState('');
+  const [dryRunResult, setDryRunResult] = useState<BulkImportResult<FacultyImportRecord> | null>(null);
+  const [importCommitSuccess, setImportCommitSuccess] = useState<string | null>(null);
+
+  // Fetch Faculty
+  const {
+    data: facultyList,
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: ['admin-faculty', departmentCode, statusFilter, search],
+    queryFn: () =>
+      AdminService.getFaculty({
+        departmentCode,
+        status: statusFilter,
+        search,
+      }),
   });
 
-  // Fetch Faculty List
-  const { data: facultyMembers, isLoading } = useQuery({
-    queryKey: ['admin-faculty-registry'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('faculty')
-        .select('*, departments(*)')
-        .order('first_name', { ascending: true });
-      if (error) throw error;
-      return data as FacultyMember[];
-    },
-  });
-
-  // Set default selection
-  React.useEffect(() => {
-    if (facultyMembers && facultyMembers.length > 0 && !selectedFacultyId) {
-      setSelectedFacultyId(facultyMembers[0].id);
-    }
-  }, [facultyMembers, selectedFacultyId]);
-
-  // Fetch details (workload subjects & sections) for active faculty member
-  const { data: workload } = useQuery({
-    queryKey: ['admin-faculty-workload', selectedFacultyId],
-    queryFn: async () => {
-      if (!selectedFacultyId) return null;
-      
-      const { data: subjectsList } = await supabase
-        .from('faculty_subjects')
-        .select('*, subjects(*)')
-        .eq('faculty_id', selectedFacultyId);
-
-      const { data: classesList } = await supabase
-        .from('faculty_classes')
-        .select('*, courses(*), semesters(*)')
-        .eq('faculty_id', selectedFacultyId);
-
-      return {
-        subjects: subjectsList || [],
-        classes: classesList || [],
-      };
-    },
-    enabled: !!selectedFacultyId,
-  });
-
-  // Enroll Faculty Mutation
-  const enrollFacultyMutation = useMutation({
-    mutationFn: async () => {
-      const facultyUuid = crypto.randomUUID();
-
-      // 1. Create auth user
-      const { error: authError } = await supabase.rpc('admin_create_user', {
-        p_id: facultyUuid,
-        p_email: email.trim(),
-        p_password: 'password123',
-        p_first_name: firstName.trim(),
-        p_last_name: lastName.trim(),
-        p_role: 'Faculty',
-      });
-
-      if (authError) throw authError;
-
-      // 2. Create faculty record
-      const { error: profileError } = await supabase.from('faculty').insert({
-        id: facultyUuid,
-        faculty_id: facultyIdInput.trim(),
-        first_name: firstName.trim(),
-        last_name: lastName.trim(),
-        email: email.trim(),
-        phone: phoneInput.trim() || null,
-        department_id: deptId,
-      });
-
-      if (profileError) throw profileError;
-
-      // 3. Log Action
-      await supabase.from('audit_logs').insert({
-        user_email: admin?.name || 'Admin',
-        role: admin?.role || 'Super Admin',
-        action: `Recruited faculty member: Dr. ${firstName} ${lastName} (${facultyIdInput})`,
-        affected_records: `faculty: ${facultyUuid}`,
-      });
-    },
+  // Create Mutation
+  const createMutation = useMutation({
+    mutationFn: (data: Parameters<typeof AdminService.createFaculty>[0]) =>
+      AdminService.createFaculty(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-faculty-registry'] });
-      setIsEnrollOpen(false);
-      setFirstName('');
-      setLastName('');
-      setEmail('');
-      setFacultyIdInput('');
-      setPhoneInput('');
-      setSuccessMsg('Faculty member enrolled successfully. (Default password: password123)');
-      setTimeout(() => setSuccessMsg(null), 4000);
-      setErrorMsg(null);
+      queryClient.invalidateQueries({ queryKey: ['admin-faculty'] });
+      setIsCreateOpen(false);
+      setNewFacultyId('');
+      setNewFirstName('');
+      setNewLastName('');
+      setNewEmail('');
+      setNewPhone('');
+      setCreateError(null);
     },
-    onError: (err: any) => {
-      setErrorMsg(err?.message || 'Failed to enroll faculty.');
+    onError: (err: Error) => {
+      setCreateError(err.message || 'Failed to enroll faculty.');
     },
   });
 
-  // Delete Faculty Mutation
-  const deleteFacultyMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const f = facultyMembers?.find((fac) => fac.id === id);
-      const name = f ? `Dr. ${f.first_name} ${f.last_name}` : id;
-
-      const { error } = await supabase.from('faculty').delete().eq('id', id);
-      if (error) throw error;
-
-      await supabase.from('audit_logs').insert({
-        user_email: admin?.name || 'Admin',
-        role: admin?.role || 'Super Admin',
-        action: `De-enrolled faculty: ${name}`,
-        affected_records: `faculty: ${id}`,
-      });
-    },
+  // Update Mutation
+  const updateMutation = useMutation({
+    mutationFn: (data: { id: string; updates: Partial<FacultyRegistryItem> }) =>
+      AdminService.updateFaculty(data.id, data.updates),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-faculty-registry'] });
-      setSelectedFacultyId(null);
+      queryClient.invalidateQueries({ queryKey: ['admin-faculty'] });
+      setIsEditOpen(false);
+      setEditingFaculty(null);
+      setEditError(null);
+    },
+    onError: (err: Error) => {
+      setEditError(err.message || 'Failed to update faculty member.');
     },
   });
 
-  const handleEnrollSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!firstName || !lastName || !email || !facultyIdInput || !deptId) {
-      setErrorMsg('Please complete all required fields.');
-      return;
-    }
-    setErrorMsg(null);
-    enrollFacultyMutation.mutate();
+  // Deactivate Mutation
+  const deactivateMutation = useMutation({
+    mutationFn: (id: string) => AdminService.deactivateFaculty(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-faculty'] }),
+  });
+
+  // Reactivate Mutation
+  const reactivateMutation = useMutation({
+    mutationFn: (id: string) => AdminService.reactivateFaculty(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['admin-faculty'] }),
+  });
+
+  const handleOpenEdit = (fac: FacultyRegistryItem) => {
+    setEditingFaculty(fac);
+    setEditFirstName(fac.firstName);
+    setEditLastName(fac.lastName);
+    setEditEmail(fac.email);
+    setEditPhone(fac.phone || '');
+    setEditDept(fac.departmentCode);
+    setEditDesignation(fac.designation);
+    setEditCabin(fac.cabin || '');
+    setEditError(null);
+    setIsEditOpen(true);
   };
 
-  const filteredFaculty = useMemo(() => {
-    if (!facultyMembers) return [];
-    return facultyMembers.filter((f) => {
-      const q = searchQuery.toLowerCase();
-      const fullName = `dr. ${f.first_name} ${f.last_name}`.toLowerCase();
-      return (
-        fullName.includes(q) ||
-        f.faculty_id.toLowerCase().includes(q) ||
-        f.email.toLowerCase().includes(q)
-      );
+  const handleEditSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingFaculty) return;
+    updateMutation.mutate({
+      id: editingFaculty.id,
+      updates: {
+        firstName: editFirstName,
+        lastName: editLastName,
+        email: editEmail,
+        phone: editPhone,
+        departmentCode: editDept,
+        designation: editDesignation,
+        cabin: editCabin,
+      },
     });
-  }, [facultyMembers, searchQuery]);
+  };
 
-  const activeFaculty = facultyMembers?.find((f) => f.id === selectedFacultyId);
+  const handleCreateSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    createMutation.mutate({
+      facultyId: newFacultyId,
+      firstName: newFirstName,
+      lastName: newLastName,
+      email: newEmail,
+      phone: newPhone,
+      departmentCode: newDept,
+      designation: newDesignation,
+      cabin: newCabin,
+    });
+  };
+
+  const handleRunFacultyDryRun = () => {
+    if (!csvContent.trim()) return;
+    const res = AdminService.validateFacultyBulkImport(csvContent);
+    setDryRunResult(res);
+    setImportCommitSuccess(null);
+  };
+
+  const handleCommitFaculty = async () => {
+    if (!dryRunResult || dryRunResult.parsedRecords.length === 0) return;
+    const res = await AdminService.commitFacultyBulkImport(dryRunResult.parsedRecords);
+    queryClient.invalidateQueries({ queryKey: ['admin-faculty'] });
+    setImportCommitSuccess(`Committed ${res.committedCount} faculty records.`);
+    setDryRunResult(null);
+    setCsvContent('');
+  };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-64" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-44 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (isError || !facultyList) {
+    return (
+      <ErrorState
+        title="Failed to Load Faculty Registry"
+        message="Could not load faculty directory."
+        onRetry={() => refetch()}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <Link href="/admin" className="text-xs text-slate-500 hover:text-indigo-650 font-extrabold flex items-center gap-1 mb-2">
-            <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
-          </Link>
-          <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 font-sans">Faculty Registry Desk</h2>
-          <p className="text-slate-550 text-xs mt-1 font-semibold">
-            Manage teacher payroll listings, course workloads, subject mappings, and department assignments.
-          </p>
+      <PageHeader
+        title="Faculty Registry & Academic Workloads"
+        description="Manage faculty appointments, departmental affiliations, teaching quotas, and soft-deactivations."
+        actions={
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setIsImportOpen(true);
+                setDryRunResult(null);
+                setImportCommitSuccess(null);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors shadow-xs cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+              <span>Bulk Import CSV</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsCreateOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors shadow-xs cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Enroll Faculty</span>
+            </button>
+          </div>
+        }
+      />
+
+      {/* SEARCH AND FILTERS */}
+      <div className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div className="relative w-full sm:w-80">
+          <Search className="w-4 h-4 text-[var(--text-muted)] absolute left-3 top-2.5" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by ID, name, or cabin..."
+            className="w-full pl-9 pr-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-xs text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+          />
         </div>
 
-        <button
-          onClick={() => {
-            if (departments?.length) setDeptId(departments[0].id);
-            setIsEnrollOpen(true);
-          }}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs py-2.5 px-4 rounded-xl shadow-sm flex items-center gap-1.5 transition self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" /> Recruit Faculty Member
-        </button>
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <select
+            value={departmentCode}
+            onChange={(e) => setDepartmentCode(e.target.value)}
+            className="px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)] font-semibold"
+          >
+            <option value="all">All Departments</option>
+            <option value="CSE">Computer Science (CSE)</option>
+            <option value="ECE">Electronics (ECE)</option>
+            <option value="ME">Mechanical (ME)</option>
+          </select>
+
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)] font-semibold"
+          >
+            <option value="all">All Statuses</option>
+            <option value="Active">Active</option>
+            <option value="Inactive">Inactive</option>
+          </select>
+        </div>
       </div>
 
-      {/* Alert details */}
-      <AnimatePresence>
-        {successMsg && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="p-4 bg-emerald-500/10 border border-emerald-200/40 text-emerald-800 text-xs flex items-center gap-2.5 rounded-xl font-extrabold"
-          >
-            <CheckCircle className="w-4.5 h-4.5 text-emerald-600 shrink-0" />
-            <span>{successMsg}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* FACULTY CARDS GRID */}
+      {facultyList.length === 0 ? (
+        <EmptyState
+          title="No Faculty Found"
+          description="No faculty records match the active search and department filters."
+        />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+          {facultyList.map((f) => (
+            <div
+              key={f.id}
+              className={`p-5 rounded-2xl border bg-[var(--surface)] shadow-sm transition-all flex flex-col justify-between ${
+                f.status === 'Inactive' ? 'border-[var(--border)] opacity-70' : 'border-[var(--border)] hover:border-[var(--border-strong)]'
+              }`}
+            >
+              <div>
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <span className="font-mono text-xs font-black px-2 py-0.5 rounded bg-[var(--accent-soft)] text-[var(--accent)]">
+                    {f.facultyId}
+                  </span>
+                  <StatusBadge status={f.status === 'Active' ? 'success' : 'neutral'} label={f.status} />
+                </div>
+                <h4 className="text-sm font-extrabold text-[var(--text)] tracking-tight mt-1">{f.fullName}</h4>
+                <span className="text-xs font-bold text-[var(--accent)] block mt-0.5">
+                  {f.designation} • {f.departmentCode}
+                </span>
 
-      {/* Registry Panel */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: Faculty List table */}
-        <div className="lg:col-span-2 bg-white/50 backdrop-blur-md border border-slate-200/80 rounded-2xl overflow-hidden flex flex-col h-[70vh] shadow-sm">
-          {/* Search bar */}
-          <div className="p-4 border-b border-slate-200/60 bg-white/20">
-            <div className="relative">
-              <Search className="absolute left-3.5 top-3 w-4 h-4 text-slate-450" />
+                <div className="mt-4 space-y-1.5 text-xs text-[var(--text-muted)]">
+                  <div className="flex items-center gap-1.5">
+                    <Mail className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                    <span>{f.email}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Building className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                    <span>{f.cabin}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 pt-3 border-t border-[var(--border)] flex items-center justify-between text-xs">
+                <span className="font-bold text-[var(--text)] tabular-nums">
+                  {f.teachingLoadHours} hrs / week load
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEdit(f)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--accent-soft)] rounded-lg transition-colors cursor-pointer"
+                    title="Edit Faculty Record"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>Edit</span>
+                  </button>
+                  {f.status === 'Active' ? (
+                    <button
+                      type="button"
+                      onClick={() => deactivateMutation.mutate(f.id)}
+                      className="px-2.5 py-1 text-xs font-bold text-[var(--text-muted)] hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30 rounded-lg transition-colors cursor-pointer"
+                    >
+                      Deactivate
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => reactivateMutation.mutate(f.id)}
+                      className="px-2.5 py-1 text-xs font-bold text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 rounded-lg transition-colors cursor-pointer"
+                    >
+                      Reactivate
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ENROLL FACULTY MODAL */}
+      <Dialog
+        isOpen={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        title="Enroll New Faculty Member"
+        description="Register a new academic instructor with departmental affiliation."
+      >
+        <form onSubmit={handleCreateSubmit} className="space-y-4">
+          {createError && (
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300 font-semibold flex items-center gap-2">
+              <XCircle className="w-4 h-4 shrink-0" />
+              <span>{createError}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Faculty Employee ID *
+              </label>
               <input
                 type="text"
-                placeholder="Search faculty members by name, id, email..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-white/40 border border-slate-200/60 rounded-xl py-2 pl-10 pr-4 text-xs text-slate-800 placeholder-slate-455 focus:outline-none focus:border-indigo-500 transition font-semibold"
+                required
+                value={newFacultyId}
+                onChange={(e) => setNewFacultyId(e.target.value)}
+                placeholder="e.g. FAC-CS-005"
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)] uppercase font-mono"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Department *
+              </label>
+              <select
+                value={newDept}
+                onChange={(e) => setNewDept(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              >
+                <option value="CSE">Computer Science (CSE)</option>
+                <option value="ECE">Electronics (ECE)</option>
+                <option value="ME">Mechanical (ME)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                First Name *
+              </label>
+              <input
+                type="text"
+                required
+                value={newFirstName}
+                onChange={(e) => setNewFirstName(e.target.value)}
+                placeholder="e.g. Pooja"
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Last Name *
+              </label>
+              <input
+                type="text"
+                required
+                value={newLastName}
+                onChange={(e) => setNewLastName(e.target.value)}
+                placeholder="e.g. Iyer"
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
               />
             </div>
           </div>
 
-          <div className="flex-grow overflow-y-auto">
-            {isLoading ? (
-              <div className="p-12 text-center text-slate-550">
-                <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mx-auto mb-3" />
-                <p className="text-xs font-bold">Loading faculty staff...</p>
-              </div>
-            ) : filteredFaculty.length > 0 ? (
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="bg-white/30 border-b border-slate-200/60 text-slate-550 uppercase font-extrabold text-[9.5px] tracking-wider">
-                    <th className="py-3 px-4">Instructor details</th>
-                    <th className="py-3 px-4">Faculty ID</th>
-                    <th className="py-3 px-4">Department</th>
-                    <th className="py-3 px-4 text-right">Review</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200/60 font-semibold text-slate-700">
-                  {filteredFaculty.map((f) => (
-                    <tr
-                      key={f.id}
-                      onClick={() => setSelectedFacultyId(f.id)}
-                      className={`hover:bg-white/40 transition cursor-pointer ${
-                        selectedFacultyId === f.id ? 'bg-indigo-50/50' : ''
-                      }`}
-                    >
-                      <td className="py-3.5 px-4">
-                        <div className="text-slate-900 font-extrabold">Dr. {f.first_name} {f.last_name}</div>
-                        <div className="text-[10px] text-slate-500 mt-0.5 font-medium">{f.email}</div>
-                      </td>
-                      <td className="py-3.5 px-4 text-slate-850 font-sans font-semibold">{f.faculty_id}</td>
-                      <td className="py-3.5 px-4 text-slate-700">{f.departments?.name}</td>
-                      <td className="py-3.5 px-4 text-right">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (confirm(`Are you sure you want to de-enroll Dr. ${f.first_name} ${f.last_name}?`)) {
-                              deleteFacultyMutation.mutate(f.id);
-                            }
-                          }}
-                          className="p-1.5 rounded-lg text-slate-450 hover:text-red-655 hover:bg-red-50 transition"
-                          title="De-enroll instructor"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div className="p-12 text-center text-slate-500 text-xs font-bold">No faculty matching search filters.</div>
-            )}
-          </div>
-        </div>
-
-        {/* Right: workload dossier card */}
-        <div className="lg:col-span-1">
-          {activeFaculty ? (
-            <div className="bg-white/50 backdrop-blur-md border border-slate-200/80 rounded-2xl p-6 shadow-sm space-y-6">
-              {/* Profile Card Header */}
-              <div className="flex gap-3.5 pb-4 border-b border-slate-200/60">
-                <div className="w-12 h-12 rounded-full bg-white/40 border border-slate-200 flex items-center justify-center font-black text-slate-800 uppercase text-xs shadow-inner shrink-0">
-                  {activeFaculty.first_name[0]}{activeFaculty.last_name[0]}
-                </div>
-                <div>
-                  <h3 className="text-sm font-extrabold text-slate-900 font-sans">Dr. {activeFaculty.first_name} {activeFaculty.last_name}</h3>
-                  <span className="text-[10px] text-slate-500 font-semibold block mt-0.5">{activeFaculty.faculty_id}</span>
-                  <span className="bg-white/70 border border-slate-200/80 text-indigo-750 text-[9.5px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded mt-1.5 inline-block">
-                    {activeFaculty.departments?.name}
-                  </span>
-                </div>
-              </div>
-
-              {/* Dossier Workload detail lists */}
-              <div className="space-y-4 text-xs font-bold text-slate-700">
-                {workload && (
-                  <>
-                    {/* Subjects taught */}
-                    <div>
-                      <span className="text-[9.5px] font-extrabold text-slate-500 uppercase tracking-wider block mb-2.5">
-                        Assigned Subject Workload
-                      </span>
-                      {workload.subjects.length > 0 ? (
-                        <div className="space-y-2">
-                          {workload.subjects.map((sub: any) => (
-                            <div
-                              key={sub.id}
-                              className="flex items-center justify-between p-2.5 bg-white/30 border border-slate-200/60 rounded-xl"
-                            >
-                              <div className="flex items-center gap-2">
-                                <BookOpen className="w-4 h-4 text-indigo-600 shrink-0" />
-                                <span className="text-slate-800 leading-tight font-semibold">{sub.subjects?.name}</span>
-                              </div>
-                              <span className="text-[9.5px] text-slate-500 shrink-0 font-extrabold">
-                                {sub.subjects?.code}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-slate-550 italic text-[11px] font-semibold">No subjects mapped.</span>
-                      )}
-                    </div>
-
-                    {/* Classes taught */}
-                    <div className="border-t border-slate-200/60 pt-4">
-                      <span className="text-[9.5px] font-extrabold text-slate-500 uppercase tracking-wider block mb-2.5">
-                        Timetable Class Mappings
-                      </span>
-                      {workload.classes.length > 0 ? (
-                        <div className="space-y-2">
-                          {workload.classes.map((cls: any) => (
-                            <div
-                              key={cls.id}
-                              className="flex items-center justify-between p-2.5 bg-white/30 border border-slate-200/60 rounded-xl"
-                            >
-                              <div className="flex items-center gap-2">
-                                <CalendarCheck className="w-4 h-4 text-indigo-600 shrink-0" />
-                                <span className="text-slate-800 leading-tight font-semibold">
-                                  {cls.courses?.code} (Sem {cls.semesters?.number || 6})
-                                </span>
-                              </div>
-                              <span className="text-[9.5px] bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded font-extrabold uppercase shrink-0">
-                                Section {cls.section}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-slate-550 italic text-[11px] font-semibold">No classes mapped.</span>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Official Email *
+              </label>
+              <input
+                type="email"
+                required
+                value={newEmail}
+                onChange={(e) => setNewEmail(e.target.value)}
+                placeholder="pooja.iyer@campusos.dev"
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
             </div>
-          ) : (
-            <div className="bg-white/40 border border-dashed border-slate-250/80 rounded-2xl p-8 text-center text-slate-500 h-64 flex flex-col items-center justify-center">
-              <GraduationCap className="w-10 h-10 text-slate-400 mb-2 stroke-[1.5] animate-bounce" />
-              <h4 className="text-xs font-extrabold text-slate-700">No dossier selected</h4>
-              <p className="text-[10px] text-slate-500 max-w-xs mt-1 font-semibold">
-                Select an instructor in the registry table list to view workloads.
-              </p>
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Designation
+              </label>
+              <input
+                type="text"
+                value={newDesignation}
+                onChange={(e) => setNewDesignation(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-[var(--text)] block mb-1">
+              Cabin / Office Location
+            </label>
+            <input
+              type="text"
+              value={newCabin}
+              onChange={(e) => setNewCabin(e.target.value)}
+              placeholder="e.g. Room 305, Academic Block A"
+              className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+            />
+          </div>
+
+          <div className="pt-3 flex justify-end gap-2 border-t border-[var(--border)]">
+            <button
+              type="button"
+              onClick={() => setIsCreateOpen(false)}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={createMutation.isPending}
+              className="px-4 py-1.5 rounded-xl text-xs font-bold bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50"
+            >
+              {createMutation.isPending ? 'Enrolling...' : 'Enroll Faculty'}
+            </button>
+          </div>
+        </form>
+      </Dialog>
+
+      {/* EDIT FACULTY MODAL */}
+      <Dialog
+        isOpen={isEditOpen}
+        onClose={() => {
+          setIsEditOpen(false);
+          setEditingFaculty(null);
+        }}
+        title={`Edit Faculty: ${editingFaculty?.facultyId || ''}`}
+        description="Update faculty profile and teaching appointment details."
+      >
+        <form onSubmit={handleEditSubmit} className="space-y-4">
+          {editError && (
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300 font-semibold flex items-center gap-2">
+              <XCircle className="w-4 h-4 shrink-0" />
+              <span>{editError}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Faculty Employee ID
+              </label>
+              <input
+                type="text"
+                disabled
+                value={editingFaculty?.facultyId || ''}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-xs text-[var(--text-muted)] uppercase font-mono cursor-not-allowed"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Department *
+              </label>
+              <select
+                value={editDept}
+                onChange={(e) => setEditDept(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              >
+                <option value="CSE">Computer Science (CSE)</option>
+                <option value="ECE">Electronics (ECE)</option>
+                <option value="ME">Mechanical (ME)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                First Name *
+              </label>
+              <input
+                type="text"
+                required
+                value={editFirstName}
+                onChange={(e) => setEditFirstName(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Last Name *
+              </label>
+              <input
+                type="text"
+                required
+                value={editLastName}
+                onChange={(e) => setEditLastName(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Institutional Email *
+              </label>
+              <input
+                type="email"
+                required
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Phone
+              </label>
+              <input
+                type="tel"
+                value={editPhone}
+                onChange={(e) => setEditPhone(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-[var(--text)] block mb-1">
+              Designation *
+            </label>
+            <input
+              type="text"
+              required
+              value={editDesignation}
+              onChange={(e) => setEditDesignation(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-[var(--text)] block mb-1">
+              Cabin / Office Location
+            </label>
+            <input
+              type="text"
+              value={editCabin}
+              onChange={(e) => setEditCabin(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+            />
+          </div>
+
+          <div className="pt-3 flex justify-end gap-2 border-t border-[var(--border)]">
+            <button
+              type="button"
+              onClick={() => {
+                setIsEditOpen(false);
+                setEditingFaculty(null);
+              }}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={updateMutation.isPending}
+              className="px-4 py-1.5 rounded-xl text-xs font-bold bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-50"
+            >
+              {updateMutation.isPending ? 'Updating...' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </Dialog>
+
+      {/* FACULTY BULK IMPORT MODAL */}
+      <Dialog
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+        title="Faculty Bulk Import (Dry Run)"
+        description="Validate and ingest faculty records from CSV format."
+        className="max-w-2xl"
+      >
+        <div className="space-y-4">
+          {importCommitSuccess && (
+            <div className="p-3 rounded-xl bg-emerald-50 text-emerald-800 text-xs font-bold flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 text-emerald-600" />
+              <span>{importCommitSuccess}</span>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase">Sample Data:</span>
+            <button
+              type="button"
+              onClick={() => {
+                setCsvContent(sampleFacultyValidCsv);
+                setDryRunResult(null);
+              }}
+              className="text-xs font-bold text-[var(--accent)] hover:underline"
+            >
+              Paste Sample CSV
+            </button>
+          </div>
+
+          <textarea
+            rows={5}
+            value={csvContent}
+            onChange={(e) => setCsvContent(e.target.value)}
+            placeholder="faculty_id,first_name,last_name,email,department_code,designation,cabin"
+            className="w-full p-3 font-mono text-xs rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)]"
+          />
+
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-[var(--text-muted)]">Dry run tests formatting before saving.</span>
+            <button
+              type="button"
+              onClick={handleRunFacultyDryRun}
+              disabled={!csvContent.trim()}
+              className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+            >
+              Run Dry Run
+            </button>
+          </div>
+
+          {dryRunResult && (
+            <div className="pt-3 border-t border-[var(--border)] space-y-3">
+              <div className="flex items-center justify-between text-xs font-bold">
+                <span>Valid: {dryRunResult.validRows}</span>
+                <span>Errors: {dryRunResult.invalidRows}</span>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsImportOpen(false)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold text-[var(--text-muted)]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={dryRunResult.validRows === 0}
+                  onClick={handleCommitFaculty}
+                  className="px-4 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  Commit Import ({dryRunResult.validRows})
+                </button>
+              </div>
             </div>
           )}
         </div>
-      </div>
-
-      {/* Recruiting Modal Dialog */}
-      <AnimatePresence>
-        {isEnrollOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsEnrollOpen(false)}
-              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
-            />
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white/80 backdrop-blur-xl border border-slate-200/80 rounded-2xl shadow-xl w-full max-w-lg p-6 relative z-10 mx-4 text-slate-800"
-            >
-              <h3 className="text-sm font-extrabold text-slate-900 pb-3 border-b border-slate-200/60 flex items-center gap-2">
-                <GraduationCap className="w-4.5 h-4.5 text-indigo-600" />
-                Recruit Faculty Profile Log
-              </h3>
-
-              <form onSubmit={handleEnrollSubmit} className="space-y-4 mt-4 font-semibold text-xs">
-                {errorMsg && (
-                  <div className="p-3 bg-red-550/10 border border-red-200/40 rounded-xl text-red-800 text-xs flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-red-655 shrink-0" />
-                    <span>{errorMsg}</span>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[9.5px] font-extrabold text-slate-555 uppercase block mb-1.5">First Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                      placeholder="e.g. Sarah"
-                      className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[9.5px] font-extrabold text-slate-555 uppercase block mb-1.5">Last Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={lastName}
-                      onChange={(e) => setLastName(e.target.value)}
-                      placeholder="e.g. Jenkins"
-                      className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition font-bold"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[9.5px] font-extrabold text-slate-555 uppercase block mb-1.5">Email Address *</label>
-                    <input
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="e.g. s.jenkins@campusos.dev"
-                      className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[9.5px] font-extrabold text-slate-555 uppercase block mb-1.5">Faculty ID *</label>
-                    <input
-                      type="text"
-                      required
-                      value={facultyIdInput}
-                      onChange={(e) => setFacultyIdInput(e.target.value)}
-                      placeholder="e.g. FAC202602"
-                      className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition font-bold"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[9.5px] font-extrabold text-slate-555 uppercase block mb-1.5">Department *</label>
-                    <select
-                      value={deptId}
-                      onChange={(e) => setDeptId(e.target.value)}
-                      className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-indigo-500 transition font-extrabold"
-                    >
-                      {departments?.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.name} ({d.code})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[9.5px] font-extrabold text-slate-555 uppercase block mb-1.5">Phone Number</label>
-                    <input
-                      type="text"
-                      value={phoneInput}
-                      onChange={(e) => setPhoneInput(e.target.value)}
-                      placeholder="e.g. +1 (555) 019-3382"
-                      className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition font-bold"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end gap-3 pt-3 border-t border-slate-200/60">
-                  <button
-                    type="button"
-                    onClick={() => setIsEnrollOpen(false)}
-                    className="text-xs font-extrabold text-slate-500 hover:text-slate-700 transition"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={enrollFacultyMutation.isPending}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs py-2 px-4 rounded-xl transition disabled:opacity-50"
-                  >
-                    {enrollFacultyMutation.isPending ? 'Enrolling...' : 'Recruit Staff Member'}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      </Dialog>
     </div>
   );
 }

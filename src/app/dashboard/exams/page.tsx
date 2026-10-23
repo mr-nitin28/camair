@@ -1,319 +1,383 @@
 'use client';
 
-import React, { useMemo } from 'react';
-import { useAppStore } from '@/lib/store';
+import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
+  StudentService,
+  type SemesterResultSheet,
+} from '@/lib/services/student-service';
+import { PageHeader } from '@/components/ui/page-header';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import {
   Award,
-  ArrowLeft,
-  FileDown,
-  BookOpen,
   CalendarCheck,
-  CheckCircle,
-  FileText,
+  FileDown,
+  CheckCircle2,
+  AlertCircle,
+  Clock,
+  BookOpen,
+  History,
+  ShieldCheck,
+  ArrowRight,
+  GraduationCap,
 } from 'lucide-react';
 import Link from 'next/link';
 
-// Detailed Fallback Mock Results
-const mockSemester5Results = [
-  {
-    id: 'r1',
-    subjects: { code: 'CS-501', name: 'Theory of Computation', credits: 4 },
-    internal_marks: 27,
-    exam_marks: 61,
-    grade: 'A+',
-    grade_points: 9,
-  },
-  {
-    id: 'r2',
-    subjects: { code: 'CS-502', name: 'Database Management Systems', credits: 4 },
-    internal_marks: 29,
-    exam_marks: 63,
-    grade: 'O',
-    grade_points: 10,
-  },
-  {
-    id: 'r3',
-    subjects: { code: 'CS-503', name: 'Design & Analysis of Algorithms', credits: 4 },
-    internal_marks: 25,
-    exam_marks: 59,
-    grade: 'A',
-    grade_points: 8,
-  },
-  {
-    id: 'r4',
-    subjects: { code: 'CS-504', name: 'Microprocessors', credits: 3 },
-    internal_marks: 24,
-    exam_marks: 54,
-    grade: 'B+',
-    grade_points: 7,
-  },
-  {
-    id: 'r5',
-    subjects: { code: 'CS-505L', name: 'DBMS Laboratory', credits: 2 },
-    internal_marks: 0,
-    exam_marks: 46,
-    grade: 'O',
-    grade_points: 10,
-  },
-  {
-    id: 'r6',
-    subjects: { code: 'CS-506L', name: 'Algorithm Design Lab', credits: 2 },
-    internal_marks: 0,
-    exam_marks: 44,
-    grade: 'A+',
-    grade_points: 9,
-  },
-];
+export default function StudentExamsPage() {
+  const [selectedSemester, setSelectedSemester] = useState<number>(6);
 
-const mockSemester6Results = [
-  {
-    id: 'r6_1',
-    subjects: { code: 'CS-601', name: 'Compiler Design', credits: 4 },
-    internal_marks: 27,
-    assignment_marks: 18,
-    practical_marks: null,
-  },
-  {
-    id: 'r6_2',
-    subjects: { code: 'CS-602', name: 'Computer Networks', credits: 4 },
-    internal_marks: 24,
-    assignment_marks: 16,
-    practical_marks: null,
-  },
-  {
-    id: 'r6_3',
-    subjects: { code: 'CS-603', name: 'Software Engineering', credits: 4 },
-    internal_marks: 26,
-    assignment_marks: 18,
-    practical_marks: null,
-  },
-  {
-    id: 'r6_4',
-    subjects: { code: 'CS-604', name: 'Artificial Intelligence', credits: 4 },
-    internal_marks: 22,
-    assignment_marks: 17,
-    practical_marks: null,
-  },
-  {
-    id: 'r6_5',
-    subjects: { code: 'CS-605', name: 'Web Technologies', credits: 4 },
-    internal_marks: 25,
-    assignment_marks: 19,
-    practical_marks: null,
-  },
-  {
-    id: 'r6_6',
-    subjects: { code: 'CS-606L', name: 'Computer Networks Lab', credits: 2 },
-    internal_marks: null,
-    assignment_marks: null,
-    practical_marks: 45,
-  },
-];
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ['student-exam-results'],
+    queryFn: () => StudentService.getExamResults(),
+    staleTime: 60 * 1000,
+  });
 
-export default function ExamsPage() {
-  const { student } = useAppStore();
+  if (isLoading) {
+    return (
+      <div className="space-y-6" data-testid="student-exams-loading">
+        <Skeleton className="h-16 w-full rounded-2xl" />
+        <Skeleton className="h-24 w-full rounded-2xl" />
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Skeleton className="h-28 rounded-2xl" />
+          <Skeleton className="h-28 rounded-2xl" />
+          <Skeleton className="h-28 rounded-2xl" />
+        </div>
+        <Skeleton className="h-96 w-full rounded-2xl" />
+      </div>
+    );
+  }
 
-  // Completed Sem 5 Grades
-  const displaySem5 = mockSemester5Results;
+  if (isError || !data) {
+    return (
+      <div className="py-12">
+        <ErrorState
+          title="Could not load examination records"
+          message={error instanceof Error ? error.message : 'Failed to retrieve published assessment sheets.'}
+          onRetry={() => refetch()}
+        />
+      </div>
+    );
+  }
 
-  // In-Progress Sem 6 Grades
-  const displaySem6 = mockSemester6Results;
+  const { studentProfile, semesters, enrolledPendingSubjects, backlogHistory } = data;
+  const currentSheet = semesters.find((s) => s.semesterNumber === selectedSemester) || semesters[0];
 
-  // Calculate Sem 5 SGPA
-  const sem5Summary = useMemo(() => {
-    let totalPoints = 0;
-    let totalCredits = 0;
-
-    displaySem5.forEach((r: any) => {
-      const credits = r.subjects?.credits || 4;
-      totalPoints += r.grade_points * credits;
-      totalCredits += credits;
-    });
-
-    const gpa = totalCredits > 0 ? (totalPoints / totalCredits).toFixed(2) : '8.75';
-    return { gpa, totalCredits };
-  }, [displaySem5]);
-
-  const handleExport = () => {
+  const handlePrint = () => {
     window.print();
   };
 
   return (
-    <div className="space-y-6">
-      {/* Printable CSS Overrides */}
-      <style jsx global>{`
-        @media print {
-          body {
-            background: #ffffff !important;
-            color: #000000 !important;
-          }
-          aside, header, nav, button, .no-print {
-            display: none !important;
-          }
-          .lg\\:pl-64, .xl\\:pl-72 {
-            padding-left: 0 !important;
-          }
-          .max-w-7xl {
-            max-width: 100% !important;
-          }
-          main {
-            padding: 0 !important;
-          }
-          .print-container {
-            border: none !important;
-            box-shadow: none !important;
-            padding: 0 !important;
-            margin: 0 !important;
-          }
-          .print-header {
-            display: block !important;
-            text-align: center;
-            margin-bottom: 2rem;
-            border-bottom: 2px solid #000;
-            padding-bottom: 1rem;
-          }
-          table {
-            color: #000000 !important;
-            border-color: #000000 !important;
-          }
-          th, td {
-            color: #000000 !important;
-            border-bottom-color: #000000 !important;
-          }
+    <div className="space-y-6" data-testid="student-exams">
+      {/* Header */}
+      <PageHeader
+        title="Examinations & Published Results"
+        description="Official grade sheets verified and published by the Examination Cell"
+        badge={<StatusBadge label="UGC 10-Point Scale" variant="info" size="sm" />}
+        actions={
+          <button
+            type="button"
+            onClick={handlePrint}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-[var(--surface)] hover:bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)] transition shadow-sm cursor-pointer"
+          >
+            <FileDown className="w-4 h-4 text-[var(--accent)]" />
+            <span>Download Official Grade Sheet</span>
+          </button>
         }
-      `}</style>
+      />
 
-      {/* Page Header (Hidden during print) */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 no-print">
-        <div>
-          <Link href="/dashboard" className="text-xs text-slate-500 hover:text-indigo-650 font-semibold flex items-center gap-1 mb-2">
-            <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
-          </Link>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Examinations & Grades</h2>
-          <p className="text-slate-600 text-xs mt-1">Review internal assessment progress, semester grades, and download grade sheets.</p>
-        </div>
-        <button
-          onClick={handleExport}
-          className="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white px-4 py-2.5 text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow shadow-indigo-600/10 shrink-0 self-start sm:self-auto"
-        >
-          <FileDown className="w-4 h-4" /> Export Result Sheet
-        </button>
-      </div>
-
-      {/* Dynamic Print Header (Shown ONLY during print) */}
-      <div className="hidden print-header text-center text-slate-900">
-        <h1 className="text-2xl font-bold tracking-tight uppercase">CampusOS University System</h1>
-        <p className="text-sm font-semibold text-slate-505 mt-1">Official Academic Term Grade Report</p>
-        <div className="grid grid-cols-2 text-left text-xs gap-2 mt-6 border border-slate-200 p-4 rounded-lg">
-          <div><strong>Student Name:</strong> {student?.first_name || 'Aarav'} {student?.last_name || 'Sharma'}</div>
-          <div><strong>Student ID:</strong> {student?.student_id || 'STU-2023-0042'}</div>
-          <div><strong>Course Name:</strong> {student?.courses?.name || 'B.Tech - Computer Science'}</div>
-          <div><strong>Department:</strong> {student?.departments?.name || 'Computer Science & Engineering'}</div>
-        </div>
-      </div>
-
-      {/* GPA summary boxes */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 no-print">
-        {[
-          { label: 'Cumulative CGPA', value: student?.cgpa ? Number(student.cgpa).toFixed(2) : '8.72', icon: Award, color: 'text-indigo-700 bg-indigo-50 border border-indigo-100' },
-          { label: 'Semester 5 SGPA', value: sem5Summary.gpa, icon: CalendarCheck, color: 'text-purple-700 bg-purple-50 border border-purple-100' },
-          { label: 'Total Credits Earned', value: `${student ? 17 * 5 : 85} Credits`, icon: CheckCircle, color: 'text-emerald-700 bg-emerald-50 border border-emerald-100' },
-        ].map((item, i) => (
-          <div key={i} className="bg-white border border-slate-200 p-5 rounded-2xl flex items-center gap-4 shadow-sm">
-            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${item.color}`}>
-              <item.icon className="w-5 h-5" />
+      {/* Student Profile & Academic Enrollment */}
+      <div className="p-4 md:p-5 rounded-2xl border border-[var(--border)] bg-gradient-to-r from-[var(--surface)] to-[var(--surface-2)] shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-[var(--accent)]/10 border border-[var(--accent)]/20 flex items-center justify-center shrink-0">
+              <GraduationCap className="w-6 h-6 text-[var(--accent)]" />
             </div>
             <div>
-              <span className="text-[9.5px] font-extrabold text-slate-500 uppercase tracking-wider block font-mono">{item.label}</span>
-              <span className="text-2xl font-black text-slate-900 block mt-0.5">{item.value}</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm font-bold text-[var(--text)]">{studentProfile.name}</h3>
+                <span className="font-mono text-[10px] font-extrabold px-2 py-0.5 rounded bg-[var(--surface-2)] text-[var(--text-muted)] border border-[var(--border)]">
+                  {studentProfile.enrolmentNo} • Roll: {studentProfile.rollNo}
+                </span>
+              </div>
+              <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                {studentProfile.programme} • {studentProfile.section}
+              </p>
+              <p className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                Faculty Advisor: <strong className="text-[var(--text)]">{studentProfile.advisor}</strong> • Session {studentProfile.academicSession}
+              </p>
             </div>
           </div>
-        ))}
+
+          <div className="flex items-center gap-2 flex-wrap text-xs">
+            <div className="p-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-center min-w-[100px]">
+              <span className="text-[10px] font-bold text-[var(--text-muted)] block uppercase">Grading Scale</span>
+              <span className="font-mono font-bold text-[var(--text)] text-xs">{studentProfile.gradingScale}</span>
+            </div>
+            <div className="p-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-center min-w-[100px]">
+              <span className="text-[10px] font-bold text-[var(--text-muted)] block uppercase">Active Semester</span>
+              <span className="font-mono font-bold text-[var(--accent)] text-xs">Semester {studentProfile.currentSemester}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Layout Grid: Semester Results and Internal assessments */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 print-container">
-        
-        {/* Semester 5 Results (Completed Transcript) */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm lg:col-span-2 space-y-4">
-          <div className="flex items-center gap-2 pb-3 border-b border-slate-200">
-            <BookOpen className="w-4.5 h-4.5 text-indigo-600 no-print" />
-            <h3 className="text-sm font-bold text-slate-800">Semester 5 Grade Details</h3>
-          </div>
+      {/* Semester Selector Tabs */}
+      <div className="flex items-center justify-between gap-4 flex-wrap border-b border-[var(--border)] pb-3">
+        <div className="flex items-center gap-2">
+          {semesters.map((sem) => (
+            <button
+              key={sem.semesterNumber}
+              type="button"
+              onClick={() => setSelectedSemester(sem.semesterNumber)}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer border ${
+                selectedSemester === sem.semesterNumber
+                  ? 'bg-[var(--accent)] text-[var(--accent-fg)] border-[var(--accent)] shadow-sm'
+                  : 'bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)] border-[var(--border)] hover:bg-[var(--surface-2)]'
+              }`}
+            >
+              Semester {sem.semesterNumber}
+              {sem.isCurrent && (
+                <span className="ml-1.5 px-1.5 py-0.2 rounded text-[9px] bg-amber-400/20 text-amber-700 dark:text-amber-300">
+                  Current
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
+        {/* Backlog Status Pill */}
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-[var(--text-muted)]">Academic Standing:</span>
+          {backlogHistory.filter((b) => b.status === 'active').length === 0 ? (
+            <StatusBadge label="Zero Active Backlogs" variant="success" size="sm" />
+          ) : (
+            <StatusBadge label="Active Backlog Detected" variant="danger" size="sm" />
+          )}
+        </div>
+      </div>
+
+      {/* Semester Summary Metrics */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm">
+          <span className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider block">
+            Semester {currentSheet.semesterNumber} SGPA
+          </span>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-3xl font-black text-[var(--text)] tabular-nums">
+              {currentSheet.sgpa.toFixed(2)}
+            </span>
+            <span className="text-xs text-[var(--text-muted)]">/ 10.00</span>
+          </div>
+          <span className="text-[11px] text-[var(--text-muted)] block mt-1">
+            Calculated via UGC weighted credit formula
+          </span>
+        </div>
+
+        <div className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm">
+          <span className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider block">
+            Credits Assessed
+          </span>
+          <div className="mt-2 flex items-baseline gap-2">
+            <span className="text-3xl font-black text-[var(--text)] tabular-nums">
+              {currentSheet.totalCredits}
+            </span>
+            <span className="text-xs text-[var(--text-muted)]">Credits</span>
+          </div>
+          <span className="text-[11px] text-[var(--text-muted)] block mt-1">
+            All enrolled credits accounted
+          </span>
+        </div>
+
+        <div className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm">
+          <span className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider block">
+            Publication Status
+          </span>
+          <div className="mt-2 flex items-center gap-2">
+            {currentSheet.isPublished ? (
+              <StatusBadge label="Published & Verified" variant="success" size="md" />
+            ) : (
+              <StatusBadge label="Partial / In-Progress" variant="warning" size="md" />
+            )}
+          </div>
+          <span className="text-[11px] text-[var(--text-muted)] block mt-1 font-mono">
+            {currentSheet.publishedDate ? `Published: ${currentSheet.publishedDate}` : 'End-Term pending release'}
+          </span>
+        </div>
+      </div>
+
+      {/* In-Progress / Notice Banner if ongoing */}
+      {currentSheet.unreleasedNotice && (
+        <div className="p-4 rounded-2xl border border-amber-300 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/20 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <h4 className="font-extrabold text-amber-950 dark:text-amber-100">
+              Notice: Ongoing Semester Evaluation
+            </h4>
+            <p className="mt-0.5 leading-relaxed">{currentSheet.unreleasedNotice}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Published Course Results Table */}
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm overflow-hidden">
+        <div className="p-4 md:p-5 border-b border-[var(--border)] flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-[var(--text)]">
+              Published Course Grade Roster
+            </h3>
+            <p className="text-xs text-[var(--text-muted)] mt-0.5">
+              Only verified and published assessments are displayed. Draft or review-pending marks are excluded.
+            </p>
+          </div>
+          <span className="text-xs text-[var(--text-muted)] font-mono">
+            {currentSheet.results.length} Published Assessment{currentSheet.results.length === 1 ? '' : 's'}
+          </span>
+        </div>
+
+        {currentSheet.results.length === 0 ? (
+          <EmptyState
+            title={currentSheet.isPublished ? "No examination records" : "Results not published yet"}
+            description={
+              currentSheet.isPublished
+                ? "No assessment records are registered for this semester."
+                : "Official grade sheets for this semester have not been released by the Examination Cell."
+            }
+            className="py-12 border-none"
+          />
+        ) : (
+          <div className="overflow-x-auto custom-scrollbar">
+            <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-extrabold text-[9.5px] font-mono">
-                  <th className="p-3">Code</th>
-                  <th className="p-3">Subject Name</th>
-                  <th className="p-3 text-center">Credits</th>
-                  <th className="p-3 text-center">Marks (100)</th>
-                  <th className="p-3 text-center">Letter Grade</th>
-                  <th className="p-3 text-center">Grade Points</th>
+                <tr className="bg-[var(--surface-2)]/60 text-[var(--text-muted)] border-b border-[var(--border)] font-bold uppercase tracking-wider text-[10px]">
+                  <th className="py-3 px-4">Subject Code</th>
+                  <th className="py-3 px-4">Course Name & Assessment</th>
+                  <th className="py-3 px-4 text-center">Credits</th>
+                  <th className="py-3 px-4 text-center">Max Marks</th>
+                  <th className="py-3 px-4 text-center">Marks Obtained</th>
+                  <th className="py-3 px-4 text-center">Letter Grade</th>
+                  <th className="py-3 px-4 text-center">Grade Points</th>
+                  <th className="py-3 px-4 text-right">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200/85">
-                {displaySem5.map((r: any) => (
-                  <tr key={r.id} className="hover:bg-slate-50 transition">
-                    <td className="p-3 font-mono font-bold text-indigo-700">{r.subjects?.code}</td>
-                    <td className="p-3 font-semibold text-slate-800">{r.subjects?.name}</td>
-                    <td className="p-3 text-center font-bold text-slate-600">{r.subjects?.credits}</td>
-                    <td className="p-3 text-center font-bold text-slate-900">
-                      {r.internal_marks + r.exam_marks}
+              <tbody className="divide-y divide-[var(--border)] font-medium">
+                {currentSheet.results.map((r) => (
+                  <tr
+                    key={r.id}
+                    className="hover:bg-[var(--surface-2)]/40 transition-colors"
+                  >
+                    <td className="py-3.5 px-4 font-mono font-bold text-[var(--accent)]">
+                      {r.subjectCode}
                     </td>
-                    <td className="p-3 text-center">
-                      <span className="font-extrabold text-indigo-700 px-2.5 py-0.5 bg-indigo-50 border border-indigo-100 rounded-md">
+                    <td className="py-3.5 px-4">
+                      <div className="font-bold text-[var(--text)]">{r.subjectName}</div>
+                      <div className="text-[11px] text-[var(--text-muted)]">{r.assessmentName}</div>
+                    </td>
+                    <td className="py-3.5 px-4 text-center font-mono">{r.credits}</td>
+                    <td className="py-3.5 px-4 text-center font-mono">{r.maxMarks}</td>
+                    <td className="py-3.5 px-4 text-center font-mono font-bold text-[var(--text)]">
+                      {r.marksObtained}
+                    </td>
+                    <td className="py-3.5 px-4 text-center">
+                      <span className="inline-block px-2 py-0.5 rounded font-black text-xs bg-[var(--surface-2)] text-[var(--text)] border border-[var(--border)]">
                         {r.grade}
                       </span>
                     </td>
-                    <td className="p-3 text-center font-extrabold text-slate-700">{r.grade_points}</td>
+                    <td className="py-3.5 px-4 text-center font-mono font-black text-[var(--accent)]">
+                      {r.gradePoints.toFixed(1)}
+                    </td>
+                    <td className="py-3.5 px-4 text-right">
+                      <StatusBadge label="Published" variant="success" size="sm" />
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
+        )}
+      </div>
 
-        {/* Semester 6 Internals (In-Progress) */}
-        <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
-          <div className="flex items-center gap-2 pb-3 border-b border-slate-200">
-            <FileText className="w-4.5 h-4.5 text-indigo-600 no-print" />
-            <h3 className="text-sm font-bold text-slate-800">Semester 6 Assessments</h3>
+      {/* Enrolled Subjects Pending Official Publication */}
+      {currentSheet.isCurrent && enrolledPendingSubjects && enrolledPendingSubjects.length > 0 && (
+        <div className="p-5 md:p-6 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[var(--border)]">
+            <div>
+              <h3 className="text-sm font-bold text-[var(--text)] flex items-center gap-2">
+                <Clock className="w-4 h-4 text-amber-500" />
+                Enrolled Subjects — Assessments Under Evaluation
+              </h3>
+              <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                Current semester enrolled subjects where end-term marks are being verified prior to official publication
+              </p>
+            </div>
+            <StatusBadge label="Pending Official Release" variant="warning" size="sm" />
           </div>
 
-          <div className="space-y-4">
-            {displaySem6.map((r: any) => {
-              const isLab = r.subjects?.code === 'CS-606L';
-              return (
-                <div key={r.id} className="space-y-2.5 pb-3.5 border-b border-slate-200/70 last:border-0 last:pb-0">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-900 leading-tight">{r.subjects?.name}</h4>
-                      <span className="text-[9.5px] font-mono font-bold text-indigo-700">{r.subjects?.code}</span>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 text-center text-[10px] bg-slate-50 p-2.5 rounded-xl border border-slate-200 font-bold">
-                    <div>
-                      <span className="text-[8.5px] text-slate-500 block font-bold">Test (30)</span>
-                      <span className="text-slate-800 font-extrabold">{isLab ? '-' : r.internal_marks}</span>
-                    </div>
-                    <div>
-                      <span className="text-[8.5px] text-slate-500 block font-bold">Assign (20)</span>
-                      <span className="text-slate-800 font-extrabold">{isLab ? '-' : r.assignment_marks}</span>
-                    </div>
-                    <div>
-                      <span className="text-[8.5px] text-slate-500 block font-bold">Practical (50)</span>
-                      <span className="text-slate-800 font-extrabold">{isLab ? r.practical_marks : '-'}</span>
-                    </div>
-                  </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            {enrolledPendingSubjects.map((sub) => (
+              <div
+                key={sub.subjectCode}
+                className="p-3.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)]/40 hover:bg-[var(--surface-2)]/70 transition space-y-1.5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-xs font-bold text-[var(--accent)]">
+                    {sub.subjectCode} • {sub.credits} Credits
+                  </span>
+                  <StatusBadge label="Under Evaluation" variant="warning" size="sm" />
                 </div>
-              );
-            })}
+                <h4 className="text-xs font-bold text-[var(--text)]">{sub.subjectName}</h4>
+                <p className="text-[11px] text-[var(--text-muted)]">{sub.facultyName}</p>
+                <div className="pt-1.5 border-t border-[var(--border)]/60 text-[10px] text-amber-700 dark:text-amber-300 font-medium">
+                  {sub.notice}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
+      )}
 
+      {/* Historical Cleared Backlog Section */}
+      <div className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm">
+        <div className="flex items-center gap-2 mb-3">
+          <History className="w-4 h-4 text-[var(--accent)]" />
+          <h3 className="text-sm font-bold text-[var(--text)]">Academic Remediation & Backlog History</h3>
+        </div>
+        <p className="text-xs text-[var(--text-muted)] mb-4">
+          Record of remedial evaluations, supplementary examinations, and re-evaluations.
+        </p>
+
+        <div className="space-y-2">
+          {backlogHistory.map((item, idx) => (
+            <div
+              key={idx}
+              className="p-3 rounded-xl border border-[var(--border)] bg-[var(--surface-2)]/30 flex items-center justify-between text-xs"
+            >
+              <div>
+                <span className="font-mono font-bold text-[var(--accent)] mr-2">
+                  {item.subjectCode}
+                </span>
+                <span className="font-semibold text-[var(--text)]">{item.subjectName}</span>
+                <span className="text-[11px] text-[var(--text-muted)] ml-2">
+                  (Encountered: Semester {item.semester})
+                </span>
+              </div>
+              <StatusBadge
+                label={item.status === 'cleared' ? 'Cleared via Supplementary' : 'Active'}
+                variant={item.status === 'cleared' ? 'success' : 'danger'}
+                size="sm"
+              />
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

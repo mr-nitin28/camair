@@ -2,332 +2,354 @@
 
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
-import { useAppStore } from '@/lib/store';
-import { motion } from 'framer-motion';
+import { AdminService, type AdminKpiMetric } from '@/lib/services/admin-service';
+import { StatCard } from '@/components/ui/stat-card';
+import { PageHeader } from '@/components/ui/page-header';
+import { Skeleton, SkeletonChart } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { Tooltip } from '@/components/ui/tooltip';
 import {
   Users,
   GraduationCap,
-  Building,
+  CalendarCheck,
+  Award,
   CreditCard,
-  History,
   CheckSquare,
   ArrowRight,
   TrendingUp,
-  PlusCircle,
-  ShieldCheck,
+  History,
+  ShieldAlert,
+  Info,
+  Calendar,
+  Layers,
+  FileSpreadsheet,
   Megaphone,
-  Settings,
 } from 'lucide-react';
 import Link from 'next/link';
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, BarChart, Bar, Legend } from 'recharts';
+import dynamic from 'next/dynamic';
+
+const AdminDashboardCharts = dynamic(
+  () => import('@/components/charts/admin-dashboard-charts'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <SkeletonChart height={256} />
+        <SkeletonChart height={256} />
+      </div>
+    ),
+  }
+);
+
+const kpiIcons: Record<string, React.ElementType> = {
+  'kpi-enrollment': Users,
+  'kpi-faculty': GraduationCap,
+  'kpi-attendance': CalendarCheck,
+  'kpi-published-results': Award,
+  'kpi-fee-collection': CreditCard,
+  'kpi-pending-approvals': CheckSquare,
+};
 
 export default function AdminDashboardOverview() {
-  const { admin } = useAppStore();
-
-  // Fetch metrics counts
-  const { data: metrics, isLoading } = useQuery({
-    queryKey: ['admin-dashboard-metrics'],
-    queryFn: async () => {
-      // 1. Total Students
-      const { count: studentCount } = await supabase
-        .from('students')
-        .select('*', { count: 'exact', head: true });
-
-      // 2. Total Faculty
-      const { count: facultyCount } = await supabase
-        .from('faculty')
-        .select('*', { count: 'exact', head: true });
-
-      // 3. Departments
-      const { count: deptCount } = await supabase
-        .from('departments')
-        .select('*', { count: 'exact', head: true });
-
-      // 4. Leave & Service Requests Pending
-      const { count: pendingLeaves } = await supabase
-        .from('leave_requests')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'Pending');
-
-      const { count: pendingService } = await supabase
-        .from('service_requests')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'Pending');
-
-      // 5. Total Fees Collected (Success Payments)
-      const { data: payments } = await supabase
-        .from('payments')
-        .select('amount_paid')
-        .eq('status', 'Success');
-      
-      const totalCollected = payments?.reduce((sum, p) => sum + Number(p.amount_paid), 0) || 0;
-
-      return {
-        students: studentCount || 0,
-        faculty: facultyCount || 0,
-        departments: deptCount || 0,
-        pendingApprovals: (pendingLeaves || 0) + (pendingService || 0),
-        feesCollected: totalCollected,
-      };
-    },
+  const {
+    data: summary,
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: ['admin-overview-summary'],
+    queryFn: () => AdminService.getOverviewSummary(),
   });
 
-  // Fetch recent audit logs from database
-  const { data: recentLogs } = useQuery({
-    queryKey: ['admin-recent-audit-logs'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('audit_logs')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(5);
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-8 w-64" />
+          <Skeleton className="h-4 w-96" />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
+              <Skeleton className="h-4 w-28 mb-3" />
+              <Skeleton className="h-9 w-20 mb-2" />
+              <Skeleton className="h-3 w-36" />
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <SkeletonChart height={256} />
+          <SkeletonChart height={256} />
+        </div>
+      </div>
+    );
+  }
 
-      if (error) return [];
-      return data;
-    },
-  });
-
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.08,
-      },
-    },
-  };
-
-  const itemVariants = {
-    hidden: { opacity: 0, y: 15 },
-    show: { opacity: 1, y: 0, transition: { type: 'spring' as const, stiffness: 260, damping: 25 } },
-  };
-
-  // Mock static data for charts
-  const collectionTrends = [
-    { name: 'Jan', Target: 4000, Collected: 2400 },
-    { name: 'Feb', Target: 3000, Collected: 1398 },
-    { name: 'Mar', Target: 5000, Collected: 4800 },
-    { name: 'Apr', Target: 4780, Collected: 3908 },
-    { name: 'May', Target: 5890, Collected: 4800 },
-    { name: 'Jun', Target: 6000, Collected: 5700 },
-  ];
-
-  const attendanceTrends = [
-    { name: 'Week 1', CSE: 92, ECE: 88, ME: 84 },
-    { name: 'Week 2', CSE: 94, ECE: 89, ME: 85 },
-    { name: 'Week 3', CSE: 89, ECE: 84, ME: 80 },
-    { name: 'Week 4', CSE: 91, ECE: 87, ME: 82 },
-    { name: 'Week 5', CSE: 95, ECE: 91, ME: 86 },
-    { name: 'Week 6', CSE: 93, ECE: 90, ME: 85 },
-  ];
+  if (isError || !summary) {
+    return (
+      <ErrorState
+        title="Failed to Load Command Center Summary"
+        message="The institutional analytics feed could not be retrieved. Check your network or permissions."
+        onRetry={() => refetch()}
+      />
+    );
+  }
 
   return (
-    <motion.div
-      variants={containerVariants}
-      initial="hidden"
-      animate="show"
-      className="space-y-8"
-    >
-      {/* 1. HERO SECTION (Welcome Banner) */}
-      <motion.div
-        variants={itemVariants}
-        className="bg-gradient-to-r from-indigo-950 via-indigo-900 to-slate-900 p-6 md:p-8 rounded-3xl text-white relative overflow-hidden shadow-lg border border-indigo-950/20"
-      >
-        <div className="absolute top-[-50%] right-[-10%] w-[50%] h-[200%] bg-white/5 blur-[90px] rounded-full pointer-events-none" />
-        
-        <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-          <div className="flex items-center gap-4.5">
-            <div className="w-16 h-16 rounded-2xl bg-white/10 backdrop-blur-md border border-white/10 flex items-center justify-center font-bold text-xl text-white uppercase shadow-inner">
-              AD
-            </div>
-            <div>
-              <span className="text-[10px] font-extrabold uppercase tracking-widest text-indigo-200 bg-indigo-600/30 px-2.5 py-1 rounded-full backdrop-blur-sm">
-                Control Room
-              </span>
-              <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight mt-2.5 font-sans">
-                Welcome, {admin?.name || 'Administrator'}
-              </h2>
-              <p className="text-slate-300 text-xs md:text-sm mt-1 max-w-xl font-semibold">
-                Monitor institutional performance, audit financial accounts, process permissions, and manage student registry databases.
-              </p>
-            </div>
+    <div className="space-y-8">
+      {/* Page Header */}
+      <PageHeader
+        title="Institutional Command Center"
+        description="Authoritative operating overview, revenue intelligence, and registry controls across all departments."
+        actions={
+          <div className="flex items-center gap-2">
+            <Link
+              href="/admin/students?action=import"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors shadow-xs"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              <span>Bulk Import</span>
+            </Link>
+            <Link
+              href="/admin/communications"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors"
+            >
+              <Megaphone className="w-4 h-4 text-amber-500" />
+              <span>Broadcast Notice</span>
+            </Link>
           </div>
+        }
+      />
 
-          <div className="bg-white/10 backdrop-blur-md border border-white/10 py-2.5 px-4 rounded-2xl flex items-center gap-3">
-            <div className="w-2.5 h-2.5 bg-emerald-400 rounded-full animate-ping" />
-            <span className="text-xs font-bold text-slate-100 font-sans">
-              System Active
-            </span>
-          </div>
-        </div>
-      </motion.div>
-
-      {/* 2. QUICK STATS (Glassmorphic metrics grid) */}
-      <motion.div
-        variants={itemVariants}
-        className="grid grid-cols-2 lg:grid-cols-5 gap-4.5"
-      >
-        {[
-          { label: 'Registered Students', value: metrics?.students || '0', icon: Users, sub: 'Active registry', color: 'text-indigo-600 bg-indigo-50/50 border-indigo-100/50' },
-          { label: 'Active Faculty Staff', value: metrics?.faculty || '0', icon: GraduationCap, sub: 'Workforce registry', color: 'text-indigo-600 bg-indigo-50/50 border-indigo-100/50' },
-          { label: 'Departments', value: metrics?.departments || '0', icon: Building, sub: 'Academic groups', color: 'text-indigo-600 bg-indigo-50/50 border-indigo-100/50' },
-          { label: 'Fee Collections', value: `₹${metrics?.feesCollected.toLocaleString() || '0'}`, icon: CreditCard, sub: 'Payments success', color: 'text-emerald-600 bg-emerald-50/50 border-emerald-100/50' },
-          { label: 'Pending Approvals', value: metrics?.pendingApprovals || '0', icon: CheckSquare, sub: 'Awaiting review', color: (metrics?.pendingApprovals || 0) > 0 ? 'text-amber-600 bg-amber-50/50 border-amber-100/50' : 'text-slate-550 bg-slate-50 border-slate-100' },
-        ].map((stat, i) => (
-          <div
-            key={i}
-            className="bg-white/50 backdrop-blur-md border border-slate-200/80 p-5 rounded-2xl hover:border-slate-350 hover:shadow-md transition-all duration-300 flex flex-col justify-between"
-          >
-            <div className="flex items-start justify-between">
-              <span className="text-[9.5px] font-extrabold uppercase tracking-wider text-slate-500 leading-tight">
-                {stat.label}
-              </span>
-              <div className={`p-1.5 rounded-lg shrink-0 border ${stat.color}`}>
-                <stat.icon className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="mt-4">
-              <p className="text-2xl font-extrabold text-slate-900 tracking-tight font-sans">
-                {isLoading ? <div className="w-12 h-6 bg-slate-100/50 animate-pulse rounded" /> : stat.value}
-              </p>
-              <span className="text-[9.5px] text-slate-500 block font-bold mt-1 truncate">
-                {stat.sub}
-              </span>
-            </div>
-          </div>
-        ))}
-      </motion.div>
-
-      {/* 3. QUICK ACTIONS GRID */}
-      <motion.div
-        variants={itemVariants}
-        className="grid grid-cols-2 md:grid-cols-5 gap-4"
-      >
-        {[
-          { label: 'Register Student', href: '/admin/students', icon: PlusCircle, color: 'bg-white/40 border-slate-200/80 hover:border-indigo-400 text-slate-700 hover:text-indigo-800 hover:bg-white/60' },
-          { label: 'Review Approvals', href: '/admin/approvals', icon: CheckSquare, color: 'bg-white/40 border-slate-200/80 hover:border-indigo-400 text-slate-700 hover:text-indigo-800 hover:bg-white/60' },
-          { label: 'Broadcast Notices', href: '/admin/communications', icon: Megaphone, color: 'bg-white/40 border-slate-200/80 hover:border-indigo-400 text-slate-700 hover:text-indigo-800 hover:bg-white/60' },
-          { label: 'Audit Trail Logs', href: '/admin/audit-logs', icon: History, color: 'bg-white/40 border-slate-200/80 hover:border-indigo-400 text-slate-700 hover:text-indigo-800 hover:bg-white/60' },
-          { label: 'System Settings', href: '/admin/settings', icon: Settings, color: 'bg-white/40 border-slate-200/80 hover:border-indigo-400 text-slate-700 hover:text-indigo-800 hover:bg-white/60' },
-        ].map((act, i) => (
-          <Link key={i} href={act.href}>
-            <div className={`flex items-center justify-between p-4 rounded-2xl border text-xs font-bold shadow-sm transition-all duration-300 cursor-pointer ${act.color}`}>
-              <div className="flex items-center gap-2.5">
-                <act.icon className="w-5 h-5 shrink-0 text-indigo-650" />
-                <span>{act.label}</span>
-              </div>
-              <ArrowRight className="w-4 h-4 opacity-50 shrink-0 text-slate-555" />
-            </div>
-          </Link>
-        ))}
-      </motion.div>
-
-      {/* 4. MAIN ACADEMIC & FINANCIAL ANALYTICS */}
-      <motion.div
-        variants={itemVariants}
-        className="grid grid-cols-1 lg:grid-cols-2 gap-6"
-      >
-        {/* Financial collection Chart */}
-        <div className="bg-white/50 backdrop-blur-md border border-slate-200/80 rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-200/60 mb-5">
-            <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5 font-sans">
-              <CreditCard className="w-4 h-4 text-indigo-600" /> Revenue Collection vs Targets
-            </h3>
-            <span className="text-[10px] text-slate-500 font-bold">Real-time Feed</span>
-          </div>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={collectionTrends}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                <XAxis dataKey="name" stroke="#475569" fontSize={10} tickLine={false} />
-                <YAxis stroke="#475569" fontSize={10} tickLine={false} />
-                <Tooltip contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.9)', backdropFilter: 'blur(8px)', border: '1px solid #E2E8F0', borderRadius: '12px', color: '#0F172A' }} />
-                <Legend wrapperStyle={{ fontSize: 10 }} />
-                <Bar dataKey="Target" fill="#818cf8" opacity={0.6} radius={[4, 4, 0, 0]} />
-                <Bar dataKey="Collected" fill="#10b981" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+      {/* 1. KPI TILES WITH SPARKLINES, DELTA CHANGES & DOCUMENTED DEFINITIONS */}
+      <section aria-label="Key Performance Indicators">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-xs font-extrabold uppercase tracking-widest text-[var(--text-muted)] flex items-center gap-2">
+            <Layers className="w-3.5 h-3.5 text-[var(--accent)]" />
+            <span>Key Institutional Metrics & Sparklines</span>
+          </h2>
+          <span className="text-[11px] font-semibold text-[var(--text-muted)]">
+            Click metric card to inspect deep-linked report
+          </span>
         </div>
 
-        {/* Attendance trends chart */}
-        <div className="bg-white/50 backdrop-blur-md border border-slate-200/80 rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center justify-between pb-4 border-b border-slate-200/60 mb-5">
-            <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5 font-sans">
-              <TrendingUp className="w-4 h-4 text-indigo-600" /> Department Attendance Trends
-            </h3>
-            <span className="text-[10px] text-slate-500 font-bold">Overall Average: 91%</span>
-          </div>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={attendanceTrends}>
-                <defs>
-                  <linearGradient id="colorCse" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#4f46e5" stopOpacity={0}/>
-                  </linearGradient>
-                  <linearGradient id="colorEce" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#14B8A6" stopOpacity={0.3}/>
-                    <stop offset="95%" stopColor="#14B8A6" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                <XAxis dataKey="name" stroke="#475569" fontSize={10} tickLine={false} />
-                <YAxis stroke="#475569" fontSize={10} domain={[60, 100]} tickLine={false} />
-                <Tooltip contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.9)', backdropFilter: 'blur(8px)', border: '1px solid #E2E8F0', borderRadius: '12px', color: '#0F172A' }} />
-                <Legend wrapperStyle={{ fontSize: 10 }} />
-                <Area type="monotone" dataKey="CSE" stroke="#4f46e5" fillOpacity={1} fill="url(#colorCse)" strokeWidth={2} />
-                <Area type="monotone" dataKey="ECE" stroke="#14B8A6" fillOpacity={1} fill="url(#colorEce)" strokeWidth={2} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      </motion.div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {summary.kpis.map((kpi) => {
+            const Icon = kpiIcons[kpi.id] || TrendingUp;
+            return (
+              <Link
+                key={kpi.id}
+                href={kpi.deepLink}
+                className="group block focus:outline-none focus:ring-2 focus:ring-[var(--accent)] rounded-2xl"
+              >
+                <div className="relative p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] group-hover:border-[var(--accent)] group-hover:shadow-md transition-all duration-200 flex flex-col justify-between h-full">
+                  {/* Top Bar: Title + Definition Tooltip + Icon */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)] group-hover:text-[var(--text)] transition-colors">
+                        {kpi.title}
+                      </span>
+                      <Tooltip content={kpi.definition} side="top">
+                        <button
+                          type="button"
+                          className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text)] transition-colors"
+                          aria-label={`Definition for ${kpi.title}`}
+                          onClick={(e) => e.preventDefault()}
+                        >
+                          <Info className="w-3.5 h-3.5" />
+                        </button>
+                      </Tooltip>
+                    </div>
 
-      {/* 5. BOTTOM SECTION: AUDIT LOGS SUMMARY */}
-      <motion.div
-        variants={itemVariants}
-        className="bg-white/50 backdrop-blur-md border border-slate-200/80 rounded-2xl p-6 shadow-sm"
-      >
-        <div className="flex items-center justify-between pb-3 border-b border-slate-200/60 mb-4">
-          <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-2 font-sans">
-            <History className="w-4.5 h-4.5 text-indigo-600" /> Recent Security & Operations Logs
-          </h3>
-          <Link href="/admin/audit-logs" className="text-[10px] text-indigo-650 hover:underline font-extrabold flex items-center gap-0.5">
-            Full Audit Trail <ArrowRight className="w-3 h-3" />
-          </Link>
-        </div>
-
-        <div className="divide-y divide-slate-200/60">
-          {recentLogs && recentLogs.length > 0 ? (
-            recentLogs.map((log) => (
-              <div key={log.id} className="py-3.5 flex flex-col sm:flex-row justify-between gap-3 text-xs font-bold text-slate-655">
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded bg-white/40 border border-slate-200 flex items-center justify-center shrink-0">
-                    <ShieldCheck className="w-4.5 h-4.5 text-indigo-600" />
+                    <div className="p-2 rounded-xl bg-[var(--accent-soft)] text-[var(--accent)] shrink-0 border border-[var(--border)] group-hover:scale-105 transition-transform">
+                      <Icon className="w-4 h-4" aria-hidden="true" />
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-slate-800 font-semibold">{log.action}</p>
-                    <span className="text-[10px] text-slate-500 block mt-0.5">
-                      {log.user_email} • {log.role}
+
+                  {/* Value + Sparkline */}
+                  <div className="mt-3 flex items-baseline justify-between gap-2">
+                    <div className="text-2xl lg:text-3xl font-extrabold text-[var(--text)] tracking-tight tabular-nums">
+                      {kpi.formattedValue}
+                    </div>
+
+                    {kpi.sparkline && kpi.sparkline.length > 1 && (
+                      <div className="w-20 h-6 shrink-0" aria-hidden="true">
+                        <svg width="80" height="24" className="overflow-visible">
+                          <polyline
+                            fill="none"
+                            stroke={kpi.isPositiveTrend ? '#10B981' : '#EF4444'}
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            points={(() => {
+                              const min = Math.min(...kpi.sparkline);
+                              const max = Math.max(...kpi.sparkline);
+                              const range = max - min || 1;
+                              const step = 80 / (kpi.sparkline.length - 1);
+                              return kpi.sparkline
+                                .map((v, idx) => {
+                                  const x = idx * step;
+                                  const y = 24 - ((v - min) / range) * 20 - 2;
+                                  return `${x},${y}`;
+                                })
+                                .join(' ');
+                            })()}
+                          />
+                        </svg>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Delta Change & Period Footnote */}
+                  <div className="mt-3 pt-2.5 border-t border-[var(--border)] flex items-center justify-between text-xs">
+                    <span
+                      className={`inline-flex items-center gap-0.5 font-bold tabular-nums px-1.5 py-0.5 rounded-md ${
+                        kpi.deltaPercent >= 0
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
+                          : 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400'
+                      }`}
+                    >
+                      {kpi.deltaPercent >= 0 ? `+${kpi.deltaPercent}%` : `${kpi.deltaPercent}%`} vs prev
+                    </span>
+
+                    <span className="text-[11px] font-semibold text-[var(--text-muted)] flex items-center gap-1">
+                      <Calendar className="w-3 h-3" />
+                      {kpi.period}
                     </span>
                   </div>
                 </div>
+              </Link>
+            );
+          })}
+        </div>
+      </section>
 
-                <div className="text-[10px] text-slate-550 sm:text-right shrink-0">
-                  {new Date(log.created_at).toLocaleDateString()} at{' '}
-                  {new Date(log.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </div>
-              </div>
-            ))
+      {/* 2. RECHARTS TREND VISUALIZATIONS */}
+      <section aria-label="Institutional Trends">
+        <AdminDashboardCharts
+          collectionTrends={summary.collectionTrends}
+          attendanceTrends={summary.attendanceTrends}
+        />
+      </section>
+
+      {/* 3. QUICK ACTIONS & RECENT AUDIT TRAIL FEED */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Quick Action Dispatcher */}
+        <div className="lg:col-span-1 p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm flex flex-col justify-between">
+          <div>
+            <h3 className="text-xs font-extrabold uppercase tracking-widest text-[var(--text-muted)] mb-3">
+              Administrative Workflows
+            </h3>
+            <p className="text-xs text-[var(--text-muted)] mb-4 leading-relaxed">
+              Fast-path shortcuts to operational consoles, bulk ingestion, and critical publication gates.
+            </p>
+
+            <div className="space-y-2">
+              {summary.quickActions.map((qa) => (
+                <Link
+                  key={qa.id}
+                  href={qa.href}
+                  className="flex items-center justify-between px-3.5 py-2.5 rounded-xl border border-[var(--border)] hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] transition-all text-xs font-bold text-[var(--text)] group"
+                >
+                  <span className="group-hover:text-[var(--accent)] transition-colors">{qa.label}</span>
+                  <div className="flex items-center gap-2">
+                    {qa.badge && (
+                      <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded-md bg-[var(--surface-3)] text-[var(--text)]">
+                        {qa.badge}
+                      </span>
+                    )}
+                    <ArrowRight className="w-3.5 h-3.5 text-[var(--text-muted)] group-hover:translate-x-0.5 group-hover:text-[var(--accent)] transition-all" />
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-6 pt-4 border-t border-[var(--border)]">
+            <Link
+              href="/admin/security"
+              className="text-xs font-bold text-[var(--accent)] hover:underline inline-flex items-center gap-1"
+            >
+              <ShieldAlert className="w-3.5 h-3.5" />
+              <span>Review Institutional Security Policy</span>
+            </Link>
+          </div>
+        </div>
+
+        {/* Recent Audit Log Feed */}
+        <div className="lg:col-span-2 p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm">
+          <div className="flex items-center justify-between mb-4 pb-3 border-b border-[var(--border)]">
+            <div className="flex items-center gap-2">
+              <History className="w-4 h-4 text-[var(--accent)]" />
+              <h3 className="text-xs font-extrabold uppercase tracking-widest text-[var(--text)]">
+                Live Audit Trail
+              </h3>
+            </div>
+            <Link
+              href="/admin/audit-logs"
+              className="text-xs font-bold text-[var(--accent)] hover:underline inline-flex items-center gap-1"
+            >
+              <span>Full Audit Viewer</span>
+              <ArrowRight className="w-3 h-3" />
+            </Link>
+          </div>
+
+          {summary.recentAuditEvents.length === 0 ? (
+            <EmptyState
+              title="No Recent Audit Logs"
+              description="Administrative audit entries will automatically appear here as changes are committed."
+            />
           ) : (
-            <div className="py-8 text-center text-slate-400 text-xs font-semibold">
-              No recent logs recorded.
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead>
+                  <tr className="border-b border-[var(--border)] text-[var(--text-muted)] uppercase text-[10px] font-extrabold tracking-wider">
+                    <th className="py-2.5 px-3">Timestamp</th>
+                    <th className="py-2.5 px-3">Action</th>
+                    <th className="py-2.5 px-3">Target Entity</th>
+                    <th className="py-2.5 px-3">Actor</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border)]">
+                  {summary.recentAuditEvents.map((evt) => (
+                    <tr key={evt.id} className="hover:bg-[var(--surface-2)] transition-colors">
+                      <td className="py-3 px-3 font-mono text-[11px] text-[var(--text-muted)] whitespace-nowrap">
+                        {new Date(evt.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} •{' '}
+                        {new Date(evt.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                      </td>
+                      <td className="py-3 px-3">
+                        <span
+                          className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider ${
+                            evt.action === 'PUBLISH' || evt.action === 'APPROVE'
+                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
+                              : evt.action === 'INSERT' || evt.action === 'BULK_IMPORT'
+                              ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-400'
+                              : evt.action === 'DELETE' || evt.action === 'REJECT'
+                              ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400'
+                              : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                          }`}
+                        >
+                          {evt.action}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 font-semibold text-[var(--text)]">
+                        <span className="font-mono text-[11px] text-[var(--text-muted)] mr-1.5">
+                          {evt.entityTable}:
+                        </span>
+                        <span>{evt.entityId}</span>
+                      </td>
+                      <td className="py-3 px-3 text-[var(--text-muted)] font-medium">
+                        {evt.actorEmail}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   );
 }

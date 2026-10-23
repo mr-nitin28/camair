@@ -1,0 +1,163 @@
+'use client';
+
+import React from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { 
+  ChevronLeft, 
+  ChevronRight, 
+  GraduationCap,
+  type LucideIcon 
+} from 'lucide-react';
+import { Tooltip } from './tooltip';
+
+export interface NavItem {
+  label: string;
+  href: string;
+  icon: LucideIcon;
+  badge?: string | number;
+}
+
+export interface NavGroup {
+  title?: string;
+  items: NavItem[];
+}
+
+export interface SidebarNavProps {
+  groups: NavGroup[];
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
+  roleTitle?: string;
+  logoHref?: string;
+  className?: string;
+}
+
+export function SidebarNav({
+  groups,
+  isCollapsed,
+  onToggleCollapse,
+  roleTitle = 'Portal',
+  logoHref = '/dashboard',
+  className = '',
+}: SidebarNavProps) {
+  const pathname = usePathname();
+
+  return (
+    <aside
+      aria-label="Sidebar navigation"
+      className={`relative h-full flex flex-col bg-[var(--surface)] border-r border-[var(--border)] transition-all duration-200 select-none ${
+        isCollapsed ? 'w-[72px]' : 'w-[264px]'
+      } ${className}`}
+    >
+      {/* Brand Header */}
+      <div className="h-16 flex items-center justify-between px-4 border-b border-[var(--border)] shrink-0">
+        <Link
+          href={logoHref}
+          className="flex items-center gap-3 overflow-hidden text-left"
+          title="CampusOS"
+        >
+          <div className="w-10 h-10 rounded-xl bg-[var(--accent)] text-white flex items-center justify-center shrink-0 shadow-sm font-extrabold">
+            <GraduationCap className="w-5 h-5" />
+          </div>
+          {!isCollapsed && (
+            <div className="min-w-0">
+              <span className="text-sm font-extrabold text-[var(--text)] tracking-tight block truncate">
+                CampusOS
+              </span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] block truncate">
+                {roleTitle}
+              </span>
+            </div>
+          )}
+        </Link>
+      </div>
+
+      {/* Navigation Groups List */}
+      <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6 custom-scrollbar">
+        {groups.map((group, gIdx) => (
+          <div key={gIdx} className="space-y-1">
+            {group.title && !isCollapsed && (
+              <h3 className="px-3 text-[10px] font-extrabold uppercase tracking-widest text-[var(--text-muted)] mb-2">
+                {group.title}
+              </h3>
+            )}
+            {group.title && isCollapsed && (
+              <div className="h-px bg-[var(--border)] mx-2 my-2" aria-hidden="true" />
+            )}
+
+            <ul className="space-y-1">
+              {group.items.map((item) => {
+                const isActive = pathname === item.href || (item.href !== '/dashboard' && item.href !== '/faculty' && item.href !== '/admin' && pathname?.startsWith(item.href));
+                const Icon = item.icon;
+
+                const linkContent = (
+                  <Link
+                    href={item.href}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all duration-150 relative group ${
+                      isActive
+                        ? 'bg-[var(--accent-soft)] text-[var(--accent)] shadow-xs'
+                        : 'text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)]'
+                    } ${isCollapsed ? 'justify-center' : ''}`}
+                    aria-current={isActive ? 'page' : undefined}
+                  >
+                    <Icon
+                      className={`w-4 h-4 shrink-0 transition-transform duration-150 ${
+                        isActive ? 'text-[var(--accent)]' : 'group-hover:scale-105'
+                      }`}
+                    />
+                    {!isCollapsed && (
+                      <span className="flex-1 truncate">{item.label}</span>
+                    )}
+                    {!isCollapsed && item.badge !== undefined && (
+                      <span className="px-1.5 py-0.5 text-[10px] font-extrabold rounded-md bg-[var(--surface-3)] text-[var(--text)]">
+                        {item.badge}
+                      </span>
+                    )}
+                    {isActive && (
+                      <span
+                        className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-[var(--accent)]"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </Link>
+                );
+
+                return (
+                  <li key={item.href}>
+                    {isCollapsed ? (
+                      <Tooltip content={item.label} side="right">
+                        {linkContent}
+                      </Tooltip>
+                    ) : (
+                      linkContent
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </nav>
+
+      {/* Collapse Toggle Footer */}
+      <div className="p-3 border-t border-[var(--border)] shrink-0 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={onToggleCollapse}
+          className="w-full flex items-center justify-center gap-2 p-2 rounded-xl text-xs font-bold text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
+          aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar to rail'}
+          title={isCollapsed ? 'Expand (264px)' : 'Collapse to rail (72px)'}
+        >
+          {isCollapsed ? (
+            <ChevronRight className="w-4 h-4" />
+          ) : (
+            <>
+              <ChevronLeft className="w-4 h-4" />
+              <span>Collapse Rail</span>
+            </>
+          )}
+        </button>
+      </div>
+    </aside>
+  );
+}

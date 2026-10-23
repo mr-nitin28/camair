@@ -1,346 +1,267 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
-import { useAppStore } from '@/lib/store';
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import dynamic from 'next/dynamic';
 import {
-  Calendar,
-  ArrowLeft,
+  StudentService,
+  type LeaveRequestRecord,
+  type LeaveRequestStatus,
+} from '@/lib/services/student-service';
+import { PageHeader } from '@/components/ui/page-header';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { Stepper } from '@/components/ui/stepper';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import type { LeaveFormValues } from '@/components/leaves/apply-leave-dialog';
+import {
+  CalendarDays,
   Plus,
   Clock,
-  CheckCircle,
+  CheckCircle2,
   XCircle,
+  AlertCircle,
   FileText,
   User,
-  MessageSquare,
-  Sparkles,
-  Loader2,
-  X,
+  Paperclip,
+  Ban,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
-import Link from 'next/link';
 
-// Detailed Mock Leaves Queue
-const mockLeaves = [
-  {
-    id: 'l1',
-    leave_type: 'Medical',
-    start_date: '2026-06-14',
-    end_date: '2026-06-17',
-    reason: 'Suffering from viral influenza. Recommended absolute bed rest by doctor.',
-    status: 'Approved',
-    attachment_url: '#',
-    actioned_by: 'Dr. Ramesh Kumar',
-    comments: 'Medical report verified. Leave approved. Make sure to cover Compiler Design labs.',
-  },
-  {
-    id: 'l2',
-    leave_type: 'Personal',
-    start_date: '2026-06-08',
-    end_date: '2026-06-09',
-    reason: 'Attending elder sister marriage ceremony in hometown.',
-    status: 'Approved',
-    attachment_url: null,
-    actioned_by: 'Dr. Ramesh Kumar',
-    comments: 'Leave approved. Submit assignments beforehand.',
-  },
-  {
-    id: 'l3',
-    leave_type: 'On Duty',
-    start_date: '2026-06-25',
-    end_date: '2026-06-27',
-    reason: 'Representing college at the National AI & Web3 Cohort hackathon.',
-    status: 'Pending',
-    attachment_url: null,
-    actioned_by: null,
-    comments: null,
-  },
-];
+const ApplyLeaveDialog = dynamic(
+  () => import('@/components/leaves/apply-leave-dialog'),
+  { ssr: false }
+);
 
-export default function LeaveManagementPage() {
-  const { student } = useAppStore();
-  const [modalOpen, setModalOpen] = useState(false);
+export default function StudentLeavesPage() {
+  const queryClient = useQueryClient();
+  const [isApplyModalOpen, setIsApplyModalOpen] = useState(false);
+  const [withdrawTargetId, setWithdrawTargetId] = useState<string | null>(null);
+  const [expandedLeaveId, setExpandedLeaveId] = useState<string | null>(null);
 
-  // Form State
-  const [leaveType, setLeaveType] = useState('Medical');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [reason, setReason] = useState('');
-  const [attachmentName, setAttachmentName] = useState('');
-  const [formError, setFormError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const {
+    data: leaves,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ['student-leave-requests'],
+    queryFn: () => StudentService.getLeaveRequests(),
+    staleTime: 30 * 1000,
+  });
 
-  // Local state to keep submitted leaves in memory for the demo
-  const [localLeaves, setLocalLeaves] = useState<any[]>([]);
+  const submitMutation = useMutation({
+    mutationFn: (values: LeaveFormValues) => StudentService.submitLeaveRequest(values),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['student-leave-requests'] });
+      setIsApplyModalOpen(false);
+    },
+  });
 
-  // Load local leaves on mount
-  React.useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('local_leaves');
-      if (saved) {
-        try {
-          setLocalLeaves(JSON.parse(saved));
-        } catch (e) {
-          console.error('Failed to parse local leaves:', e);
-        }
-      }
-    }
-  }, []);
+  const withdrawMutation = useMutation({
+    mutationFn: (leaveId: string) => StudentService.withdrawLeaveRequest(leaveId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['student-leave-requests'] });
+      setWithdrawTargetId(null);
+    },
+  });
 
-  const displayLeaves = useMemo(() => {
-    return [...localLeaves, ...mockLeaves];
-  }, [localLeaves]);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!startDate || !endDate || !reason) {
-      setFormError('Please fill in all required fields.');
-      return;
-    }
-    setFormError(null);
-    setSubmitting(true);
-
-    setTimeout(() => {
-      const newLeave = {
-        id: `local-leave-${Date.now()}`,
-        leave_type: leaveType,
-        start_date: startDate,
-        end_date: endDate,
-        reason: reason,
-        attachment_url: attachmentName ? '#' : null,
-        status: 'Pending',
-        actioned_by: null,
-        comments: null,
-      };
-
-      setLocalLeaves((prev) => {
-        const updated = [newLeave, ...prev];
-        localStorage.setItem('local_leaves', JSON.stringify(updated));
-        return updated;
-      });
-
-      setStartDate('');
-      setEndDate('');
-      setReason('');
-      setAttachmentName('');
-      setModalOpen(false);
-      setSubmitting(false);
-    }, 700);
+  const handleFormSubmit = async (values: LeaveFormValues) => {
+    await submitMutation.mutateAsync(values);
   };
 
-  return (
-    <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <Link href="/dashboard" className="text-xs text-slate-500 hover:text-indigo-600 font-semibold flex items-center gap-1 mb-2">
-            <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
-          </Link>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Leave Management</h2>
-          <p className="text-slate-600 text-xs mt-1">Submit new leave applications and track faculty approvals in real time.</p>
-        </div>
-        <button
-          onClick={() => setModalOpen(true)}
-          className="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white px-4 py-2.5 text-xs font-bold rounded-xl flex items-center gap-1.5 transition shadow shadow-indigo-600/10 shrink-0 self-start sm:self-auto"
-        >
-          <Plus className="w-4.5 h-4.5" /> Apply for Leave
-        </button>
-      </div>
+  const handleConfirmWithdraw = async () => {
+    if (withdrawTargetId) {
+      await withdrawMutation.mutateAsync(withdrawTargetId);
+    }
+  };
 
-      {/* Leave Application History Grid */}
-      {displayLeaves.length === 0 ? (
-        <div className="text-center py-16 bg-white border border-slate-200 rounded-3xl shadow-sm">
-          <Calendar className="w-10 h-10 text-slate-400 mx-auto mb-3" />
-          <p className="text-xs font-bold text-slate-700">No leave requests found</p>
-          <p className="text-[10px] text-slate-500 mt-1">Apply for leave using the button above.</p>
+  if (isLoading) {
+    return (
+      <div className="space-y-6" data-testid="student-leaves-loading">
+        <Skeleton className="h-16 w-full rounded-2xl" />
+        <div className="space-y-4">
+          <Skeleton className="h-44 rounded-2xl" />
+          <Skeleton className="h-44 rounded-2xl" />
         </div>
+      </div>
+    );
+  }
+
+  if (isError || !leaves) {
+    return (
+      <div className="py-12">
+        <ErrorState
+          title="Could not load leave records"
+          message={error instanceof Error ? error.message : 'Failed to retrieve leave history.'}
+          onRetry={() => refetch()}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6" data-testid="student-leaves">
+      {/* Header */}
+      <PageHeader
+        title="Leave Management & Applications"
+        description="Official absence approvals, medical leave certificates, and status tracking"
+        badge={<StatusBadge label="Regulatory Leave System" variant="info" size="sm" />}
+        actions={
+          <button
+            type="button"
+            onClick={() => setIsApplyModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-bold rounded-xl bg-[var(--accent)] hover:opacity-90 text-[var(--accent-fg)] transition shadow-sm cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Apply For Leave</span>
+          </button>
+        }
+      />
+
+      {/* Leave Application History */}
+      {leaves.length === 0 ? (
+        <EmptyState
+          icon={CalendarDays}
+          title="No leave applications"
+          description="You have not submitted any leave requests this semester."
+          action={
+            <button
+              type="button"
+              onClick={() => setIsApplyModalOpen(true)}
+              className="px-4 py-2 rounded-xl bg-[var(--accent)] text-[var(--accent-fg)] text-xs font-bold"
+            >
+              Apply For Leave
+            </button>
+          }
+        />
       ) : (
         <div className="space-y-4">
-          {displayLeaves.map((leave: any) => (
-            <div key={leave.id} className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-4 hover:border-slate-300 transition animate-fadeIn">
-              {/* Top row */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-[9px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-full font-mono">
-                    {leave.leave_type} Leave
-                  </span>
-                  <div className="text-[10px] text-slate-500 font-bold flex items-center gap-1.5 font-mono">
-                    <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                    <span>
-                      {new Date(leave.start_date).toLocaleDateString()} - {new Date(leave.end_date).toLocaleDateString()}
+          {leaves.map((leave) => {
+            const isExpanded = expandedLeaveId === leave.id;
+            let statusVariant: 'success' | 'warning' | 'danger' | 'info' | 'neutral' = 'neutral';
+            if (leave.status === 'approved') statusVariant = 'success';
+            else if (leave.status === 'submitted' || leave.status === 'under_review') statusVariant = 'warning';
+            else if (leave.status === 'rejected') statusVariant = 'danger';
+            else if (leave.status === 'clarification_requested') statusVariant = 'info';
+
+            return (
+              <div
+                key={leave.id}
+                className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm space-y-4 transition-all"
+              >
+                {/* Top Strip */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <StatusBadge
+                      label={leave.leaveType}
+                      variant="info"
+                      size="sm"
+                    />
+                    <StatusBadge
+                      label={leave.status.replace('_', ' ').toUpperCase()}
+                      variant={statusVariant}
+                      size="sm"
+                    />
+                    <span className="text-xs font-mono text-[var(--text-muted)]">
+                      {new Date(leave.startDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                      {' → '}
+                      {new Date(leave.endDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                     </span>
                   </div>
-                </div>
 
-                <span
-                  className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-extrabold uppercase text-[9px] border self-start sm:self-auto ${
-                    leave.status === 'Approved'
-                      ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                      : leave.status === 'Rejected'
-                      ? 'bg-rose-50 text-rose-700 border-rose-100'
-                      : 'bg-amber-50 text-amber-700 border-amber-100'
-                  }`}
-                >
-                  {leave.status === 'Approved' && <CheckCircle className="w-3.5 h-3.5" />}
-                  {leave.status === 'Rejected' && <XCircle className="w-3.5 h-3.5" />}
-                  {leave.status === 'Pending' && <Clock className="w-3.5 h-3.5 animate-pulse" />}
-                  {leave.status}
-                </span>
-              </div>
-
-              {/* Body */}
-              <div className="space-y-1">
-                <span className="text-[9px] font-extrabold text-slate-500 uppercase block tracking-wider font-mono">Reason</span>
-                <p className="text-xs text-slate-600 leading-relaxed font-semibold">{leave.reason}</p>
-              </div>
-
-              {/* Attachment */}
-              {leave.attachment_url && (
-                <div className="flex items-center gap-1.5 text-[9.5px] text-indigo-700 font-extrabold bg-indigo-50 px-3 py-1 rounded-lg w-max border border-indigo-100 font-mono">
-                  <FileText className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>medical_certificate.pdf</span>
-                </div>
-              )}
-
-              {/* Timeline feedback if actioned */}
-              {leave.status !== 'Pending' && (
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                   <div className="flex items-center gap-2">
-                    <User className="w-4 h-4 text-slate-400" />
-                    <div>
-                      <span className="text-[9.5px] font-extrabold text-slate-500 uppercase block font-mono">Actioned By</span>
-                      <span className="text-slate-800 font-bold">{leave.actioned_by || 'Advisor'}</span>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-2">
-                    <MessageSquare className="w-4 h-4 text-slate-400 mt-0.5" />
-                    <div>
-                      <span className="text-[9.5px] font-extrabold text-slate-500 uppercase block font-mono">Remarks</span>
-                      <p className="text-slate-600 italic mt-1 font-semibold">{leave.comments || 'No remarks provided.'}</p>
-                    </div>
+                    {leave.canWithdraw && (
+                      <button
+                        type="button"
+                        onClick={() => setWithdrawTargetId(leave.id)}
+                        className="px-3 py-1.5 text-xs font-bold rounded-xl border border-rose-300 dark:border-rose-900/60 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400 hover:bg-rose-100 transition cursor-pointer inline-flex items-center gap-1.5"
+                      >
+                        <Ban className="w-3.5 h-3.5" />
+                        <span>Withdraw Request</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setExpandedLeaveId(isExpanded ? null : leave.id)}
+                      className="p-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-muted)] hover:text-[var(--text)] transition cursor-pointer"
+                    >
+                      {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    </button>
                   </div>
                 </div>
-              )}
-            </div>
-          ))}
+
+                {/* Reason & Reviewer Notes */}
+                <div className="text-xs text-[var(--text)] leading-relaxed">
+                  <p className="font-medium">{leave.reason}</p>
+                </div>
+
+                {/* Reviewer / Decision Box */}
+                {leave.decisionComment && (
+                  <div className="p-3.5 rounded-xl bg-[var(--surface-2)]/60 border border-[var(--border)] text-xs space-y-1">
+                    <div className="flex items-center justify-between font-bold text-[var(--text)]">
+                      <span className="flex items-center gap-1.5">
+                        <User className="w-3.5 h-3.5 text-[var(--accent)]" />
+                        {leave.approverName || 'Department Reviewer'}
+                      </span>
+                      <span className="text-[10px] text-[var(--text-muted)] font-mono">
+                        Official Decision Comment
+                      </span>
+                    </div>
+                    <p className="text-[var(--text-muted)]">{leave.decisionComment}</p>
+                  </div>
+                )}
+
+                {/* Expandable Lifecycle Stepper & Details */}
+                {isExpanded && (
+                  <div className="pt-4 border-t border-[var(--border)] space-y-4">
+                    <h4 className="text-xs font-extrabold uppercase tracking-wider text-[var(--text-muted)]">
+                      Application Workflow Lifecycle
+                    </h4>
+                    <Stepper
+                      steps={leave.timeline}
+                      orientation="vertical"
+                      className="pl-2"
+                    />
+                    {leave.attachmentName && (
+                      <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] pt-2 font-mono">
+                        <Paperclip className="w-3.5 h-3.5 text-[var(--accent)]" />
+                        <span>Attached Certificate: {leave.attachmentName}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* Leave Application Modal */}
-      {modalOpen && (
-        <div className="fixed inset-0 bg-slate-900/65 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-scaleUp">
-            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-indigo-600" />
-                <h3 className="font-extrabold text-sm text-slate-900">New Leave Application</h3>
-              </div>
-              <button
-                onClick={() => setModalOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="p-6 space-y-4 overflow-y-auto font-semibold text-xs text-slate-700">
-              {formError && (
-                <div className="bg-rose-50 border border-rose-100 text-rose-700 text-xs rounded-xl p-3 flex items-center gap-2">
-                  <XCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                  <span>{formError}</span>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[9.5px] font-extrabold text-slate-500 uppercase tracking-wider mb-1 font-mono">
-                    Leave Type *
-                  </label>
-                  <select
-                    value={leaveType}
-                    onChange={(e) => setLeaveType(e.target.value)}
-                    className="w-full bg-white border border-slate-200 text-slate-800 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-indigo-500/40 transition cursor-pointer font-bold shadow-sm"
-                  >
-                    <option value="Medical">Medical</option>
-                    <option value="Personal">Personal</option>
-                    <option value="On Duty">On Duty</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[9.5px] font-extrabold text-slate-500 uppercase tracking-wider mb-1 font-mono">
-                    Attachment (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="medical_certificate.pdf"
-                    value={attachmentName}
-                    onChange={(e) => setAttachmentName(e.target.value)}
-                    className="w-full bg-white border border-slate-200 text-slate-800 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-indigo-500/40 transition"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[9.5px] font-extrabold text-slate-500 uppercase tracking-wider mb-1 font-mono">
-                    Start Date *
-                  </label>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full bg-white border border-slate-200 text-slate-800 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-indigo-500/40 transition"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[9.5px] font-extrabold text-slate-500 uppercase tracking-wider mb-1 font-mono">
-                    End Date *
-                  </label>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="w-full bg-white border border-slate-200 text-slate-800 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-indigo-500/40 transition"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[9.5px] font-extrabold text-slate-500 uppercase tracking-wider mb-1 font-mono">
-                  Reason for Leave *
-                </label>
-                <textarea
-                  rows={4}
-                  placeholder="Describe your reason in detail..."
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  className="w-full bg-white border border-slate-200 text-slate-800 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-indigo-500/40 transition"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setModalOpen(false)}
-                  className="border border-slate-200 hover:bg-slate-50 text-slate-600 px-4 py-2 text-xs font-bold rounded-xl transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white px-4 py-2 text-xs font-bold rounded-xl transition shadow shadow-indigo-600/10 flex items-center justify-center gap-1.5"
-                >
-                  {submitting ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    'Submit Application'
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {/* Dynamically imported Leave Apply Dialog */}
+      {isApplyModalOpen && (
+        <ApplyLeaveDialog
+          isOpen={isApplyModalOpen}
+          onClose={() => setIsApplyModalOpen(false)}
+          onSubmit={handleFormSubmit}
+          isSubmitting={submitMutation.isPending}
+        />
       )}
+
+      {/* Withdraw Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={withdrawTargetId !== null}
+        onClose={() => setWithdrawTargetId(null)}
+        onConfirm={handleConfirmWithdraw}
+        title="Withdraw Leave Application?"
+        description="Are you sure you want to withdraw this application? Once withdrawn, the request transitions to a terminal state per institutional policy."
+        confirmText="Confirm Withdrawal"
+        cancelText="Keep Active"
+        variant="danger"
+      />
     </div>
   );
 }

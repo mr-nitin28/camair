@@ -2,365 +2,327 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
-import { useAppStore } from '@/lib/store';
-import { motion, AnimatePresence } from 'framer-motion';
+import {
+  AdminService,
+  type AdminAnnouncement,
+} from '@/lib/services/admin-service';
+import { PageHeader } from '@/components/ui/page-header';
+import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { Dialog } from '@/components/ui/dialog';
+import { StatusBadge } from '@/components/ui/status-badge';
 import {
   Megaphone,
-  ArrowLeft,
   Plus,
-  Trash2,
-  Calendar,
   AlertTriangle,
-  Tag,
+  Users,
+  Calendar,
+  Clock,
+  Radio,
+  Bell,
   CheckCircle,
-  Building,
-  Loader2,
+  Eye,
+  ShieldAlert,
 } from 'lucide-react';
-import Link from 'next/link';
 
-interface Announcement {
-  id: string;
-  title: string;
-  content: string;
-  category: 'Institution' | 'Department' | 'Examination';
-  department_id: string | null;
-  priority: 'Low' | 'Normal' | 'High' | 'Critical';
-  created_at: string;
-  departments?: { name: string; code: string };
-}
-
-export default function BroadcastBoardPage() {
-  const { admin } = useAppStore();
+export default function CommunicationsBroadcastPage() {
   const queryClient = useQueryClient();
 
-  const [isOpen, setIsOpen] = useState(false);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
-  const [category, setCategory] = useState<'Institution' | 'Department' | 'Examination'>('Institution');
-  const [priority, setPriority] = useState<'Low' | 'Normal' | 'High' | 'Critical'>('Normal');
-  const [deptId, setDeptId] = useState<string>('all');
+  const [priority, setPriority] = useState<'Normal' | 'Important' | 'Critical'>('Normal');
+  const [category, setCategory] = useState<'Institution' | 'Department' | 'Examination' | 'Emergency Alert'>('Institution');
+  const [targetAudience, setTargetAudience] = useState<'All' | 'Students' | 'Faculty' | 'CSE' | 'ECE'>('All');
+  const [scheduledDate, setScheduledDate] = useState('');
 
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  // Fetch departments lookup
-  const { data: departments } = useQuery({
-    queryKey: ['admin-comms-depts'],
-    queryFn: async () => {
-      const { data } = await supabase.from('departments').select('*');
-      return data || [];
-    },
+  // Fetch announcements
+  const {
+    data: announcements,
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: ['admin-announcements'],
+    queryFn: () => AdminService.getAnnouncements(),
   });
 
-  // Fetch announcements list
-  const { data: notices, isLoading } = useQuery({
-    queryKey: ['admin-notices-board'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('announcements')
-        .select('*, departments(*)')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data as Announcement[];
-    },
-  });
-
-  // Publish notice Mutation
-  const publishNoticeMutation = useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase.from('announcements').insert({
-        title: title.trim(),
-        content: content.trim(),
-        category,
-        priority,
-        department_id: deptId === 'all' ? null : deptId,
-      });
-
-      if (error) throw error;
-
-      await supabase.from('audit_logs').insert({
-        user_email: admin?.name || 'Admin',
-        role: admin?.role || 'Super Admin',
-        action: `Published broadcast notice: "${title}"`,
-        affected_records: `announcements: published`,
-      });
-    },
+  // Create Mutation
+  const createMutation = useMutation({
+    mutationFn: (data: Parameters<typeof AdminService.createAnnouncement>[0]) =>
+      AdminService.createAnnouncement(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-notices-board'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-announcements'] });
+      setIsCreateOpen(false);
       setTitle('');
       setContent('');
-      setIsOpen(false);
-      setSuccessMsg('Notice board broadcast successfully published.');
-      setTimeout(() => setSuccessMsg(null), 3000);
-      setErrorMsg(null);
-    },
-    onError: (err: any) => setErrorMsg(err?.message || 'Failed to publish notice.'),
-  });
-
-  // Delete Notice Mutation
-  const deleteNoticeMutation = useMutation({
-    mutationFn: async (id: string) => {
-      const n = notices?.find((item) => item.id === id);
-      const noticeTitle = n ? n.title : id;
-
-      const { error } = await supabase.from('announcements').delete().eq('id', id);
-      if (error) throw error;
-
-      await supabase.from('audit_logs').insert({
-        user_email: admin?.name || 'Admin',
-        role: admin?.role || 'Super Admin',
-        action: `Withdrew/deleted broadcast notice: "${noticeTitle}"`,
-        affected_records: `announcements: ${id}`,
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-notices-board'] });
+      setPriority('Normal');
+      setScheduledDate('');
     },
   });
 
-  const getPriorityBadge = (p: string) => {
-    switch (p) {
-      case 'Critical':
-        return 'bg-red-500/10 border-red-200/40 text-red-800';
-      case 'High':
-        return 'bg-amber-500/10 border-amber-200/40 text-amber-800';
-      case 'Normal':
-        return 'bg-indigo-500/10 border-indigo-200/40 text-indigo-800';
-      default:
-        return 'bg-slate-200 border-slate-300 text-slate-700';
-    }
+  const handleCreateSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    createMutation.mutate({
+      title,
+      content,
+      priority,
+      category,
+      targetAudience,
+      scheduledDate: scheduledDate || undefined,
+    });
   };
+
+  const handleTriggerEmergency = () => {
+    setTitle('EMERGENCY CAMPUS ALERT: Severe Weather / Campus Closure');
+    setContent('Due to advisory forecasts, all evening classes are shifted to remote learning. Shuttle services will depart early at 16:30.');
+    setPriority('Critical');
+    setCategory('Emergency Alert');
+    setTargetAudience('All');
+    setIsCreateOpen(true);
+  };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-64" />
+        <div className="space-y-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="h-32 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (isError || !announcements) {
+    return (
+      <ErrorState
+        title="Failed to Load Broadcast Board"
+        message="Could not load institutional announcements."
+        onRetry={() => refetch()}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <Link href="/admin" className="text-xs text-slate-500 hover:text-indigo-650 font-extrabold flex items-center gap-1 mb-2">
-            <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
-          </Link>
-          <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 font-sans">Broadcast Notice Board</h2>
-          <p className="text-slate-550 text-xs mt-1 font-semibold">
-            Publish institutional circulars, academic notices, and department announcements.
-          </p>
-        </div>
-
-        <button
-          onClick={() => setIsOpen(true)}
-          className="bg-indigo-600 hover:bg-indigo-750 text-white font-extrabold text-xs py-2.5 px-4 rounded-xl shadow-sm flex items-center gap-1.5 transition self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" /> Publish Broadcast Notice
-        </button>
-      </div>
-
-      {/* Alert details */}
-      <AnimatePresence>
-        {successMsg && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="p-4 bg-emerald-500/10 border border-emerald-200/40 text-emerald-800 text-xs flex items-center gap-2.5 rounded-xl font-extrabold"
-          >
-            <CheckCircle className="w-4.5 h-4.5 text-emerald-600 shrink-0" />
-            <span>{successMsg}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Roster list */}
-      <div className="space-y-4">
-        {isLoading ? (
-          <div className="bg-white/50 backdrop-blur-md border border-slate-200/80 rounded-2xl p-8 text-center text-slate-500 font-bold">
-            <Loader2 className="w-8 h-8 animate-spin text-indigo-655 mx-auto" />
-          </div>
-        ) : notices && notices.length > 0 ? (
-          notices.map((notice) => (
-            <motion.div
-              layout
-              key={notice.id}
-              className="bg-white/50 backdrop-blur-md border border-slate-200/80 rounded-2xl p-6 shadow-sm relative overflow-hidden flex flex-col md:flex-row justify-between gap-6"
+      <PageHeader
+        title="Official Broadcast Board & Emergency Alerts"
+        description="Dispatch push notifications, critical safety alerts, and administrative notices targeted by audience."
+        actions={
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleTriggerEmergency}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border border-rose-300 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition-colors shadow-xs cursor-pointer"
             >
-              {/* Left border indicator */}
-              <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${
-                notice.priority === 'Critical' ? 'bg-red-600' :
-                notice.priority === 'High' ? 'bg-amber-500' :
-                notice.priority === 'Normal' ? 'bg-indigo-600' : 'bg-slate-400'
-              }`} />
+              <ShieldAlert className="w-4 h-4 text-rose-600" />
+              <span>Emergency Alert</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsCreateOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors shadow-xs cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Publish Notice</span>
+            </button>
+          </div>
+        }
+      />
 
-              <div className="space-y-3 flex-grow pl-2 font-semibold">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={`text-[9.5px] font-extrabold uppercase tracking-wider px-2 py-0.5 border rounded-full ${getPriorityBadge(notice.priority)}`}>
-                    {notice.priority} Priority
-                  </span>
-                  <span className="bg-white text-slate-700 text-[9.5px] font-extrabold uppercase tracking-wider px-2 py-0.5 border border-slate-200 rounded-full flex items-center gap-1">
-                    <Tag className="w-2.5 h-2.5 text-indigo-650" /> {notice.category}
-                  </span>
-                  {notice.department_id && (
-                    <span className="bg-white text-slate-700 text-[9.5px] font-extrabold uppercase tracking-wider px-2 py-0.5 border border-slate-200 rounded-full flex items-center gap-1">
-                      <Building className="w-2.5 h-2.5 text-indigo-650" /> {notice.departments?.code}
+      {/* ANNOUNCEMENTS FEED */}
+      {announcements.length === 0 ? (
+        <EmptyState
+          title="No Active Broadcasts"
+          description="Create your first institutional notice or emergency broadcast."
+        />
+      ) : (
+        <div className="space-y-4">
+          {announcements.map((ann) => (
+            <div
+              key={ann.id}
+              className={`p-5 rounded-2xl border bg-[var(--surface)] shadow-sm transition-all flex flex-col justify-between ${
+                ann.priority === 'Critical'
+                  ? 'border-rose-200 dark:border-rose-900/60 bg-rose-50/20 dark:bg-rose-950/10'
+                  : 'border-[var(--border)] hover:border-[var(--border-strong)]'
+              }`}
+            >
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span
+                      className={`text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded ${
+                        ann.priority === 'Critical'
+                          ? 'bg-rose-600 text-white animate-pulse'
+                          : ann.priority === 'Important'
+                          ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/40 dark:text-amber-300'
+                          : 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300'
+                      }`}
+                    >
+                      {ann.priority} Priority
                     </span>
-                  )}
-                  <span className="text-slate-500 text-[10px] font-bold flex items-center gap-1 font-sans">
-                    <Calendar className="w-3 h-3 text-slate-450" /> {new Date(notice.created_at).toLocaleDateString()}
+
+                    <span className="text-xs font-semibold text-[var(--text-muted)]">
+                      {ann.category}
+                    </span>
+
+                    <span className="text-xs font-bold text-[var(--accent)] flex items-center gap-1">
+                      <Users className="w-3.5 h-3.5" />
+                      Audience: {ann.targetAudience}
+                    </span>
+                  </div>
+
+                  <span className="text-[11px] font-mono text-[var(--text-muted)]">
+                    Published by {ann.author}
                   </span>
                 </div>
 
-                <h3 className="text-sm font-extrabold text-slate-900 leading-tight font-sans">{notice.title}</h3>
-                <p className="text-slate-500 text-xs leading-relaxed max-w-4xl whitespace-pre-line font-semibold">{notice.content}</p>
+                <h3 className="text-base font-extrabold text-[var(--text)] tracking-tight">
+                  {ann.title}
+                </h3>
+
+                <p className="text-xs text-[var(--text)] leading-relaxed">
+                  {ann.content}
+                </p>
               </div>
 
-              <div className="flex items-start justify-end shrink-0">
-                <button
-                  onClick={() => {
-                    if (confirm('Are you sure you want to withdraw/delete this circular notice?')) {
-                      deleteNoticeMutation.mutate(notice.id);
-                    }
-                  }}
-                  className="p-1.5 rounded-lg text-slate-450 hover:text-red-655 hover:bg-red-500/10 transition border border-transparent hover:border-red-200/40"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            </motion.div>
-          ))
-        ) : (
-          <div className="bg-white/50 backdrop-blur-md border border-slate-200/80 rounded-2xl p-12 text-center text-slate-500 font-bold">
-            <Megaphone className="w-12 h-12 text-slate-400 stroke-[1.5] mx-auto mb-3 animate-pulse" />
-            <h3 className="text-xs font-extrabold text-slate-700">Notice board is empty</h3>
-            <p className="text-[10px] text-slate-555 mt-1 max-w-xs mx-auto font-semibold">
-              Any circular announcements you publish to the institution or specific departments will be logged here.
-            </p>
-          </div>
-        )}
-      </div>
+              <div className="mt-4 pt-3 border-t border-[var(--border)] flex items-center justify-between text-xs text-[var(--text-muted)]">
+                <div className="flex items-center gap-2">
+                  <Eye className="w-3.5 h-3.5" />
+                  <span className="font-bold text-[var(--text)] tabular-nums">{ann.reachCount}</span>
+                  <span>portals delivered</span>
+                </div>
 
-      {/* Broadcast Notice Modal Dialog */}
-      <AnimatePresence>
-        {isOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setIsOpen(false)}
-              className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+                <div className="flex items-center gap-1.5 font-medium">
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>{new Date(ann.publishedAt).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* CREATE BROADCAST DIALOG */}
+      <Dialog
+        isOpen={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        title="Compose Official Broadcast Notice"
+        description="Broadcast communications across web dashboards and mobile notification feeds."
+        className="max-w-xl"
+      >
+        <form onSubmit={handleCreateSubmit} className="space-y-4">
+          <div>
+            <label className="text-xs font-bold text-[var(--text)] block mb-1">
+              Notice Title *
+            </label>
+            <input
+              type="text"
+              required
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Schedule Revision for Mid-Term Exams"
+              className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)] font-semibold"
             />
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white/80 backdrop-blur-xl border border-slate-200/80 rounded-2xl shadow-xl w-full max-w-lg p-6 relative z-10 mx-4 text-slate-805"
-            >
-              <h3 className="text-sm font-extrabold text-slate-900 pb-3 border-b border-slate-200/60 flex items-center gap-2">
-                <Megaphone className="w-4.5 h-4.5 text-indigo-650" />
-                Draft Broadcast Notice
-              </h3>
-
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  publishNoticeMutation.mutate();
-                }}
-                className="space-y-4 mt-4 font-semibold text-xs"
-              >
-                {errorMsg && (
-                  <div className="p-3 bg-red-550/10 border border-red-200/40 rounded-xl text-red-800 text-xs flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-red-655 shrink-0" />
-                    <span>{errorMsg}</span>
-                  </div>
-                )}
-
-                <div>
-                  <label className="text-[9.5px] font-extrabold text-slate-555 uppercase block mb-1.5">Announcement Title</label>
-                  <input
-                    type="text"
-                    required
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="e.g. End Semester Practical Timelines"
-                    className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition font-bold"
-                  />
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="text-[9.5px] font-extrabold text-slate-555 uppercase block mb-1.5">Audience Target</label>
-                    <select
-                      value={deptId}
-                      onChange={(e) => setDeptId(e.target.value)}
-                      className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-indigo-500 transition font-extrabold"
-                    >
-                      <option value="all">Global (All Students)</option>
-                      {departments?.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.code} Department
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[9.5px] font-extrabold text-slate-555 uppercase block mb-1.5">Category</label>
-                    <select
-                      value={category}
-                      onChange={(e: any) => setCategory(e.target.value)}
-                      className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-indigo-500 transition font-extrabold"
-                    >
-                      <option value="Institution">General Notice</option>
-                      <option value="Department">Dept Circular</option>
-                      <option value="Examination">Exam Notice</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[9.5px] font-extrabold text-slate-555 uppercase block mb-1.5">Priority</label>
-                    <select
-                      value={priority}
-                      onChange={(e: any) => setPriority(e.target.value)}
-                      className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-700 focus:outline-none focus:border-indigo-500 transition font-extrabold"
-                    >
-                      <option value="Low">Low</option>
-                      <option value="Normal">Normal</option>
-                      <option value="High">High</option>
-                      <option value="Critical">Critical</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-[9.5px] font-extrabold text-slate-555 uppercase block mb-1.5">Circular Content</label>
-                  <textarea
-                    rows={6}
-                    required
-                    value={content}
-                    onChange={(e) => setContent(e.target.value)}
-                    placeholder="Write detailed announcements content..."
-                    className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition resize-none font-bold"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-3 pt-3 border-t border-slate-200/60">
-                  <button
-                    type="button"
-                    onClick={() => setIsOpen(false)}
-                    className="text-xs font-extrabold text-slate-500 hover:text-slate-700 transition"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={publishNoticeMutation.isPending}
-                    className="bg-indigo-600 hover:bg-indigo-750 text-white font-extrabold text-xs py-2 px-4 rounded-xl transition"
-                  >
-                    Confirm & Publish
-                  </button>
-                </div>
-              </form>
-            </motion.div>
           </div>
-        )}
-      </AnimatePresence>
+
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Priority Level *
+              </label>
+              <select
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as 'Normal' | 'Important' | 'Critical')}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs"
+              >
+                <option value="Normal">Normal</option>
+                <option value="Important">Important</option>
+                <option value="Critical">Critical Alert</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Target Audience *
+              </label>
+              <select
+                value={targetAudience}
+                onChange={(e) => setTargetAudience(e.target.value as 'All' | 'Students' | 'Faculty' | 'CSE' | 'ECE')}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs"
+              >
+                <option value="All">All Campus</option>
+                <option value="Students">Students Only</option>
+                <option value="Faculty">Faculty Only</option>
+                <option value="CSE">CSE Dept</option>
+                <option value="ECE">ECE Dept</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Category *
+              </label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value as 'Institution' | 'Department' | 'Examination' | 'Emergency Alert')}
+                className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs"
+              >
+                <option value="Institution">Institution</option>
+                <option value="Department">Department</option>
+                <option value="Examination">Examination</option>
+                <option value="Emergency Alert">Emergency Alert</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-[var(--text)] block mb-1">
+              Detailed Broadcast Body *
+            </label>
+            <textarea
+              rows={4}
+              required
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              placeholder="State the official notification announcement..."
+              className="w-full p-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-[var(--text)] block mb-1">
+              Optional Scheduled Release Date
+            </label>
+            <input
+              type="datetime-local"
+              value={scheduledDate}
+              onChange={(e) => setScheduledDate(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs"
+            />
+          </div>
+
+          <div className="pt-3 flex justify-end gap-2 border-t border-[var(--border)]">
+            <button
+              type="button"
+              onClick={() => setIsCreateOpen(false)}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold text-[var(--text-muted)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={createMutation.isPending}
+              className="px-4 py-1.5 rounded-xl text-xs font-bold bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]"
+            >
+              {createMutation.isPending ? 'Publishing...' : 'Dispatch Broadcast'}
+            </button>
+          </div>
+        </form>
+      </Dialog>
     </div>
   );
 }

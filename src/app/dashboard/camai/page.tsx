@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useAppStore, type StudentProfile } from '@/lib/store';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -383,7 +383,7 @@ function RichTextRenderer({ text, isUser }: { text: string; isUser: boolean }) {
   return <div className="space-y-1">{elements}</div>;
 }
 
-export default function CamAIPage() {
+function CamAIContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { student } = useAppStore();
@@ -1292,3 +1292,18 @@ function CreditCardIcon(props: any) {
 function AwardIcon(props: any) {
   return <Award className={props.className} />;
 }
+
+export default function CamAIPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+        </div>
+      }
+    >
+      <CamAIContent />
+    </Suspense>
+  );
+}
+

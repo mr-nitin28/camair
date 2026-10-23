@@ -1,117 +1,116 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
-import { useAppStore } from '@/lib/store';
+import {
+  FacultyService,
+  type FacultyAssignmentRecord,
+  type AssignmentSubmissionItem,
+} from '@/lib/services/faculty-service';
+import { Dialog } from '@/components/ui/dialog';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { SkeletonList, SkeletonCard } from '@/components/ui/skeleton';
 import {
   FileEdit,
   ArrowLeft,
   Plus,
   Clock,
   CheckCircle,
-  XCircle,
   FileText,
   Sparkles,
-  Loader2,
-  Calendar,
-  X,
-  AlertCircle,
+  Paperclip,
+  Check,
+  Send,
+  User,
+  AlertTriangle,
 } from 'lucide-react';
 import Link from 'next/link';
 
 export default function FacultyAssignmentsPage() {
-  const { faculty } = useAppStore();
   const queryClient = useQueryClient();
 
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null);
-  
+
   // Grade Modal State
   const [gradeModalOpen, setGradeModalOpen] = useState(false);
-  const [selectedSubmission, setSelectedSubmission] = useState<any | null>(null);
+  const [activeSubmission, setActiveSubmission] = useState<AssignmentSubmissionItem | null>(null);
   const [gradeMarks, setGradeMarks] = useState('');
   const [gradeFeedback, setGradeFeedback] = useState('');
   const [gradeError, setGradeError] = useState<string | null>(null);
 
-  // New Assignment Form State
-  const [subjectId, setSubjectId] = useState('');
+  // Form State for New Assignment
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [dueDate, setDueDate] = useState('');
-  const [maxMarks, setMaxMarks] = useState('100');
+  const [maxMarks, setMaxMarks] = useState('50');
+  const [sectionName, setSectionName] = useState('Section A & B');
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Fetch subjects
-  const { data: subjects } = useQuery({
-    queryKey: ['subjects-assignments-dropdown', faculty?.id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('faculty_subjects')
-        .select('*, subjects(*)');
-      if (error) throw error;
-      return data?.map((fs: any) => fs.subjects) || [];
-    },
-    enabled: !!faculty,
+  const [successToast, setSuccessToast] = useState<string | null>(null);
+
+  // 1. Fetch Assignments
+  const {
+    data: assignments,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ['faculty-assignments'],
+    queryFn: () => FacultyService.getAssignments('00000000-0000-0000-0000-000000000020'),
   });
 
-  // Set default subject on load
-  React.useEffect(() => {
-    if (subjects && subjects.length > 0 && !subjectId) {
-      setSubjectId(subjects[0].id);
+  // Default active assignment
+  const activeAssignment = React.useMemo(() => {
+    if (!assignments || assignments.length === 0) return null;
+    if (selectedAssignmentId) {
+      const found = assignments.find((a) => a.id === selectedAssignmentId);
+      if (found) return found;
     }
-  }, [subjects, subjectId]);
+    return assignments[0];
+  }, [assignments, selectedAssignmentId]);
 
-  // Fetch Assignments
-  const { data: assignments, isLoading: assignmentsLoading } = useQuery({
-    queryKey: ['assignments-list-faculty'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('assignments')
-        .select('*, subjects(*)');
-      if (error) throw error;
-      return data;
-    },
-  });
-
-  // Fetch Submissions for selected assignment
-  const { data: submissions, isLoading: submissionsLoading } = useQuery({
-    queryKey: ['submissions-list-selected', selectedAssignmentId],
-    queryFn: async () => {
-      if (!selectedAssignmentId) return null;
-      const { data, error } = await supabase
-        .from('assignment_submissions')
-        .select('*, students(*)')
-        .eq('assignment_id', selectedAssignmentId);
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!selectedAssignmentId,
+  // 2. Fetch Submissions for active assignment
+  const {
+    data: submissions,
+    isLoading: loadingSubmissions,
+  } = useQuery({
+    queryKey: ['faculty-assignment-submissions', activeAssignment?.id],
+    queryFn: () => (activeAssignment ? FacultyService.getAssignmentSubmissions(activeAssignment.id) : []),
+    enabled: !!activeAssignment,
   });
 
   // Create Assignment Mutation
-  const createAssignmentMutation = useMutation({
+  const createMutation = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase
-        .from('assignments')
-        .insert({
-          subject_id: subjectId,
-          semester_id: '33333333-3333-3333-3333-333333333306', // Seed Sem 6
-          title,
-          description,
-          due_date: new Date(dueDate).toISOString(),
-          max_marks: Number(maxMarks),
-        });
-      if (error) throw error;
+      if (!title.trim()) throw new Error('Assignment title is required');
+      const marks = parseInt(maxMarks, 10);
+      if (isNaN(marks) || marks <= 0) throw new Error('Max marks must be a positive integer');
+
+      return await FacultyService.createAssignment({
+        subjectId: '00000000-0000-0000-0000-000000000351',
+        subjectCode: 'CS601',
+        subjectName: 'Compiler Design',
+        sectionName,
+        title: title.trim(),
+        description: description.trim(),
+        dueDate: dueDate || new Date(Date.now() + 86400000 * 14).toISOString().split('T')[0],
+        maxMarks: marks,
+        attachments: ['CS601_Specification_Guide.pdf'],
+      });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['assignments-list-faculty'] });
+      setCreateModalOpen(false);
       setTitle('');
       setDescription('');
-      setDueDate('');
-      setMaxMarks('100');
-      setCreateModalOpen(false);
       setFormError(null);
+      setSuccessToast('Assignment published to students.');
+      queryClient.invalidateQueries({ queryKey: ['faculty-assignments'] });
+      queryClient.invalidateQueries({ queryKey: ['faculty-console-summary'] });
+      setTimeout(() => setSuccessToast(null), 4000);
     },
     onError: (err: any) => {
       setFormError(err?.message || 'Failed to create assignment.');
@@ -119,426 +118,435 @@ export default function FacultyAssignmentsPage() {
   });
 
   // Grade Submission Mutation
-  const gradeSubmissionMutation = useMutation({
+  const gradeMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedSubmission) return;
-      const { error } = await supabase
-        .from('assignment_submissions')
-        .update({
-          marks_obtained: Number(gradeMarks),
-          feedback: gradeFeedback,
-          status: 'Graded',
-        })
-        .eq('id', selectedSubmission.id);
-      if (error) throw error;
+      if (!activeAssignment || !activeSubmission) return;
+      const num = parseFloat(gradeMarks);
+      if (isNaN(num)) throw new Error('Valid marks number required');
+      if (num < 0 || num > activeSubmission.maxMarks) {
+        throw new Error(`Marks must be between 0 and ${activeSubmission.maxMarks}`);
+      }
+
+      return await FacultyService.gradeSubmission({
+        assignmentId: activeAssignment.id,
+        submissionId: activeSubmission.id,
+        marks: num,
+        feedback: gradeFeedback.trim() || undefined,
+      });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['submissions-list-selected', selectedAssignmentId] });
       setGradeModalOpen(false);
-      setSelectedSubmission(null);
+      setActiveSubmission(null);
       setGradeMarks('');
       setGradeFeedback('');
       setGradeError(null);
+      setSuccessToast('Submission graded successfully.');
+      queryClient.invalidateQueries({ queryKey: ['faculty-assignment-submissions'] });
+      queryClient.invalidateQueries({ queryKey: ['faculty-console-summary'] });
+      setTimeout(() => setSuccessToast(null), 4000);
     },
     onError: (err: any) => {
-      setGradeError(err?.message || 'Failed to save grade evaluations.');
+      setGradeError(err?.message || 'Failed to grade submission.');
     },
   });
 
-  const handleCreateAssignment = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title || !dueDate) {
-      setFormError('Please fill in required fields.');
-      return;
-    }
-    setFormError(null);
-    createAssignmentMutation.mutate();
-  };
-
-  const handleGradeSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!gradeMarks) {
-      setGradeError('Marks obtained field is required.');
-      return;
-    }
-    setGradeError(null);
-    gradeSubmissionMutation.mutate();
-  };
-
-  const openGradeDialog = (sub: any) => {
-    setSelectedSubmission(sub);
-    setGradeMarks(sub.marks_obtained ? String(sub.marks_obtained) : '');
+  const openGradeModal = (sub: AssignmentSubmissionItem) => {
+    setActiveSubmission(sub);
+    setGradeMarks(sub.marksObtained !== null ? sub.marksObtained.toString() : '');
     setGradeFeedback(sub.feedback || '');
+    setGradeError(null);
     setGradeModalOpen(true);
   };
 
-  const activeAssignment = useMemo(() => {
-    return assignments?.find((a) => a.id === selectedAssignmentId);
-  }, [assignments, selectedAssignmentId]);
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <SkeletonCard height={80} />
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="lg:col-span-4">
+            <SkeletonList count={4} />
+          </div>
+          <div className="lg:col-span-8">
+            <SkeletonCard height={400} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isError || !assignments) {
+    return (
+      <ErrorState
+        title="Failed to Load Assignments"
+        message={error instanceof Error ? error.message : 'Unable to query assignments desk.'}
+        onRetry={() => refetch()}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <Link href="/faculty" className="text-xs text-slate-500 hover:text-blue-600 font-semibold flex items-center gap-1 mb-2">
-            <ArrowLeft className="w-3.5 h-3.5" /> Back to Workspace
-          </Link>
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">Assignments & Evaluations</h2>
-          <p className="text-slate-500 text-xs mt-1">Design homework tasks, review student submissions, and submit grades with feedback.</p>
+      {/* Toast */}
+      {successToast && (
+        <div className="p-4 rounded-2xl bg-emerald-500 text-white font-bold text-sm shadow-lg flex items-center justify-between animate-fadeIn">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle className="w-5 h-5 text-white" />
+            <span>{successToast}</span>
+          </div>
+          <button
+            onClick={() => setSuccessToast(null)}
+            className="text-xs px-2.5 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-white"
+          >
+            Dismiss
+          </button>
         </div>
+      )}
+
+      {/* 1. PAGE HEADER */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 rounded-3xl bg-card border border-border shadow-xs">
+        <div>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground font-semibold mb-1">
+            <Link href="/faculty" className="hover:text-primary flex items-center gap-1">
+              <ArrowLeft className="w-3.5 h-3.5" /> Faculty Console
+            </Link>
+            <span>•</span>
+            <span>Coursework & Continuous Assessment Desk</span>
+          </div>
+          <h1 className="text-xl md:text-2xl font-black text-foreground tracking-tight">
+            Assignments & Submissions
+          </h1>
+        </div>
+
         <button
           onClick={() => setCreateModalOpen(true)}
-          className="bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white px-4 py-2.5 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition shadow-md shadow-blue-600/10 shrink-0 self-start sm:self-auto"
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground font-bold text-xs shadow-md hover:bg-primary/90 transition-all hover:scale-[1.02]"
         >
-          <Plus className="w-4.5 h-4.5" /> New Assignment
+          <Plus className="w-4 h-4" />
+          <span>New Assignment</span>
         </button>
       </div>
 
-      {/* Grid: Assignments List & Submissions Drawer */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Assignments list */}
-        <div className="lg:col-span-1 space-y-4">
-          <h3 className="text-sm font-bold text-slate-900">Active Assignments</h3>
-          {assignmentsLoading ? (
-            <div className="text-slate-400 text-xs text-center py-6">Loading list...</div>
-          ) : !assignments || assignments.length === 0 ? (
-            <div className="text-center py-12 bg-white border border-slate-200 rounded-2xl">
-              <FileEdit className="w-9 h-9 text-slate-300 mx-auto mb-3" />
-              <p className="text-xs font-semibold text-slate-700">No assignments created</p>
-              <p className="text-[10px] text-slate-400 mt-1">Create one using the button above.</p>
-            </div>
+      {/* 2. SPLIT-PANE DESK */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Column: Assignments List */}
+        <div className="lg:col-span-4 rounded-3xl bg-card border border-border shadow-xs overflow-hidden divide-y divide-border/40">
+          <div className="p-3.5 bg-muted/50 text-xs font-bold text-muted-foreground flex items-center justify-between">
+            <span>Published Assignments ({assignments.length})</span>
+          </div>
+
+          {assignments.length === 0 ? (
+            <EmptyState
+              icon={FileEdit}
+              title="No Assignments Published"
+              description="Click 'New Assignment' to create your first assessment task."
+            />
           ) : (
-            <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
-              {assignments.map((act: any) => {
-                const isSelected = selectedAssignmentId === act.id;
-                return (
-                  <div
-                    key={act.id}
-                    onClick={() => setSelectedAssignmentId(act.id)}
-                    className={`p-4 rounded-xl border transition-all cursor-pointer text-left ${
-                      isSelected
-                        ? 'border-blue-600 bg-blue-50/20 ring-1 ring-blue-500/5 shadow-sm'
-                        : 'border-slate-200 bg-white hover:border-slate-300'
-                    }`}
-                  >
-                    <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 bg-blue-50 text-blue-700 rounded-md">
-                      {act.subjects?.code}
+            assignments.map((asg) => {
+              const isSelected = activeAssignment?.id === asg.id;
+              return (
+                <div
+                  key={asg.id}
+                  onClick={() => setSelectedAssignmentId(asg.id)}
+                  className={`p-4 transition-colors cursor-pointer space-y-2 ${
+                    isSelected ? 'bg-primary/10 border-l-4 border-l-primary' : 'hover:bg-muted/30'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-primary font-mono">
+                      {asg.subjectCode} • {asg.sectionName}
                     </span>
-                    <h4 className="text-xs font-bold text-slate-900 mt-2 line-clamp-1">{act.title}</h4>
-                    <p className="text-[10px] text-slate-500 mt-0.5 truncate">{act.subjects?.name}</p>
-                    <div className="flex items-center gap-1.5 text-[9px] text-slate-400 font-semibold mt-2.5">
-                      <Calendar className="w-3.5 h-3.5" />
-                      <span>Due: {new Date(act.due_date).toLocaleDateString()}</span>
-                    </div>
+                    <span className="text-[11px] font-semibold text-muted-foreground">
+                      Max {asg.maxMarks} marks
+                    </span>
                   </div>
-                );
-              })}
-            </div>
+                  <h3 className="text-xs font-bold text-foreground line-clamp-1">
+                    {asg.title}
+                  </h3>
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1">
+                    <span>Due: {asg.dueDate}</span>
+                    <span className="font-semibold text-primary">
+                      {asg.gradedCount}/{asg.totalSubmissions} Graded
+                    </span>
+                  </div>
+                </div>
+              );
+            })
           )}
         </div>
 
-        {/* Submissions Detail Pane */}
-        <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm h-[75vh] flex flex-col justify-between overflow-hidden">
-          {selectedAssignmentId && activeAssignment ? (
-            <div className="flex flex-col h-full overflow-hidden">
-              <div className="pb-3 border-b border-slate-100 flex items-center justify-between shrink-0 mb-4">
-                <div>
-                  <h3 className="text-xs font-bold text-slate-950">{activeAssignment.title}</h3>
-                  <span className="text-[9.5px] text-slate-400 font-semibold">
-                    {activeAssignment.subjects?.name} ({activeAssignment.subjects?.code}) • Max Marks: {activeAssignment.max_marks}
-                  </span>
+        {/* Right Column: Submissions Review & Grading Desk */}
+        <div className="lg:col-span-8">
+          {activeAssignment ? (
+            <div className="p-6 rounded-3xl bg-card border border-border shadow-xs space-y-6">
+              {/* Header */}
+              <div className="pb-4 border-b border-border/60">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground font-semibold">
+                  <span>{activeAssignment.subjectCode} ({activeAssignment.subjectName})</span>
+                  <span>•</span>
+                  <span>Due {activeAssignment.dueDate}</span>
                 </div>
-                <button
-                  onClick={() => setSelectedAssignmentId(null)}
-                  className="lg:hidden p-1 text-slate-400 hover:text-slate-600 rounded-lg"
-                >
-                  <ArrowLeft className="w-5 h-5" />
-                </button>
-              </div>
+                <h2 className="text-xl font-bold text-foreground mt-1">
+                  {activeAssignment.title}
+                </h2>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                  {activeAssignment.description}
+                </p>
 
-              {/* Submissions Data Grid */}
-              <div className="flex-grow overflow-y-auto pr-1">
-                {submissionsLoading ? (
-                  <div className="text-center py-6 text-slate-400 text-xs">Loading submissions...</div>
-                ) : !submissions || submissions.length === 0 ? (
-                  <div className="text-center py-12 text-slate-400 text-xs">No student submissions uploaded yet.</div>
-                ) : (
-                  <div className="space-y-4">
-                    {submissions.map((sub: any) => (
-                      <div key={sub.id} className="p-4 border border-slate-100 bg-slate-50/50 rounded-xl space-y-3 hover:border-slate-200 transition text-xs">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <span className="font-bold text-slate-900 block">
-                              {sub.students?.first_name} {sub.students?.last_name}
-                            </span>
-                            <span className="text-[9.5px] text-slate-400 block font-mono">{sub.students?.student_id}</span>
-                          </div>
-
-                          <span
-                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-bold uppercase text-[9px] border ${
-                              sub.status === 'Graded'
-                                ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                                : 'bg-amber-50 text-amber-700 border-amber-100'
-                            }`}
-                          >
-                            {sub.status === 'Graded' && <CheckCircle className="w-3 h-3" />}
-                            {sub.status === 'Submitted' && <Clock className="w-3 h-3" />}
-                            {sub.status}
-                          </span>
-                        </div>
-
-                        {/* File details */}
-                        <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-100/50">
-                          <a
-                            href={sub.attachment_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="flex items-center gap-1 text-[10px] text-blue-600 font-semibold hover:underline"
-                          >
-                            <FileText className="w-3.5 h-3.5" />
-                            <span>Download submission zip</span>
-                          </a>
-
-                          <button
-                            onClick={() => openGradeDialog(sub)}
-                            className="bg-white border border-slate-200 hover:border-blue-500 hover:text-blue-600 px-3 py-1.5 text-[10px] font-bold rounded-lg transition"
-                          >
-                            {sub.status === 'Graded' ? 'Edit Grade' : 'Grade Submission'}
-                          </button>
-                        </div>
-
-                        {/* Marks breakdown if graded */}
-                        {sub.status === 'Graded' && (
-                          <div className="bg-white border border-slate-100 rounded-lg p-2.5 mt-2 space-y-1">
-                            <div className="flex justify-between items-baseline">
-                              <span className="text-[9px] font-bold text-slate-400 uppercase">Marks Obtained</span>
-                              <span className="font-bold text-slate-900 text-xs">
-                                {sub.marks_obtained} / {activeAssignment.max_marks}
-                              </span>
-                            </div>
-                            {sub.feedback && (
-                              <p className="text-[9.5px] text-slate-500 italic mt-1 leading-relaxed">
-                                Feedback: "{sub.feedback}"
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </div>
+                {activeAssignment.attachments.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 mt-3">
+                    {activeAssignment.attachments.map((file, i) => (
+                      <span
+                        key={i}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-muted text-[11px] font-bold text-foreground border border-border/60"
+                      >
+                        <Paperclip className="w-3.5 h-3.5 text-primary" />
+                        {file}
+                      </span>
                     ))}
                   </div>
                 )}
               </div>
+
+              {/* Submissions Table */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-foreground uppercase tracking-wider">
+                    Student Submissions Queue
+                  </h3>
+                  <span className="text-xs text-muted-foreground">
+                    {submissions?.length || 0} Submissions
+                  </span>
+                </div>
+
+                <div className="rounded-2xl border border-border overflow-hidden divide-y divide-border/40">
+                  {!submissions || submissions.length === 0 ? (
+                    <p className="p-6 text-center text-xs text-muted-foreground">
+                      No submissions uploaded for this assignment yet.
+                    </p>
+                  ) : (
+                    submissions.map((sub) => (
+                      <div
+                        key={sub.id}
+                        className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-muted/30 transition-colors"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-muted border border-border/60 flex items-center justify-center font-bold text-xs text-foreground shrink-0 uppercase">
+                            {sub.studentName.split(' ').map((p) => p[0]).join('')}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-foreground">
+                                {sub.studentName}
+                              </span>
+                              <span className="font-mono text-[11px] text-muted-foreground">
+                                ({sub.rollNo})
+                              </span>
+                              <StatusBadge
+                                status={sub.status === 'Graded' ? 'active' : 'pending'}
+                                label={sub.status.toUpperCase()}
+                              />
+                            </div>
+                            <p className="text-[11px] text-muted-foreground mt-0.5">
+                              Submitted {new Date(sub.submittedAt).toLocaleString()}
+                              {sub.attachmentName && ` • File: ${sub.attachmentName}`}
+                            </p>
+                            {sub.feedback && (
+                              <p className="text-[11px] text-primary mt-1 italic">
+                                Feedback: "{sub.feedback}"
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
+                          <div className="text-right">
+                            <span className="font-mono text-sm font-bold text-foreground">
+                              {sub.marksObtained !== null ? `${sub.marksObtained}/${sub.maxMarks}` : '—'}
+                            </span>
+                            <span className="block text-[10px] text-muted-foreground">
+                              {sub.status === 'Graded' ? 'Evaluated' : 'Ungraded'}
+                            </span>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => openGradeModal(sub)}
+                            className="px-3.5 py-1.5 rounded-xl bg-primary text-primary-foreground font-bold text-xs hover:bg-primary/90 transition-colors"
+                          >
+                            {sub.status === 'Graded' ? 'Edit Grade' : 'Grade'}
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
           ) : (
-            <div className="h-full flex flex-col items-center justify-center text-center text-slate-400">
-              <FileEdit className="w-12 h-12 text-slate-300 mb-3" />
-              <p className="text-xs font-semibold">Select an assignment ticket</p>
-              <p className="text-[9.5px] mt-1 text-slate-400">Click on any active item to inspect student submissions.</p>
-            </div>
+            <EmptyState
+              icon={FileEdit}
+              title="Select an Assignment"
+              description="Choose an assignment from the list to track and grade submissions."
+            />
           )}
         </div>
-
       </div>
 
-      {/* New Assignment Creator Modal */}
-      {createModalOpen && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-blue-600" />
-                <h3 className="font-bold text-sm text-slate-950">Create New Assignment</h3>
-              </div>
-              <button
-                onClick={() => setCreateModalOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
+      {/* 3. CREATE ASSIGNMENT MODAL */}
+      <Dialog
+        isOpen={createModalOpen}
+        onClose={() => setCreateModalOpen(false)}
+        title="Create New Assignment"
+      >
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-foreground">
+              Assignment Title <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="text"
+              placeholder="e.g. Bottom-Up LR(1) Parser Table Construction"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-muted/40 border border-border text-xs text-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/40"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-foreground">
+              Description & Task Requirements
+            </label>
+            <textarea
+              rows={3}
+              placeholder="Detailed instructions, format specifications, and deliverables..."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="w-full p-3 rounded-xl bg-muted/40 border border-border text-xs text-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/40"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-foreground">Maximum Marks</label>
+              <input
+                type="number"
+                value={maxMarks}
+                onChange={(e) => setMaxMarks(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-muted/40 border border-border text-xs text-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/40"
+              />
             </div>
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-foreground">Due Date</label>
+              <input
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-muted/40 border border-border text-xs text-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/40"
+              />
+            </div>
+          </div>
 
-            <form onSubmit={handleCreateAssignment} className="p-6 space-y-4 overflow-y-auto">
-              {formError && (
-                <div className="bg-red-50 border border-red-200 text-red-800 text-xs rounded-xl p-3 flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
-                  <span>{formError}</span>
-                </div>
-              )}
+          {formError && (
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 text-xs font-semibold">
+              {formError}
+            </div>
+          )}
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Subject Related *
-                  </label>
-                  <select
-                    value={subjectId}
-                    onChange={(e) => setSubjectId(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-blue-500 focus:bg-white transition cursor-pointer"
-                  >
-                    {subjects?.map((sub: any) => (
-                      <option key={sub.id} value={sub.id}>
-                        {sub.name} ({sub.code})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Max Marks *
-                  </label>
-                  <input
-                    type="number"
-                    value={maxMarks}
-                    onChange={(e) => setMaxMarks(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-blue-500 focus:bg-white transition"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                  Assignment Title *
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Capstone Design Phase 1 Architecture"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-blue-500 focus:bg-white transition"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                  Task Guidelines Description
-                </label>
-                <textarea
-                  rows={4}
-                  placeholder="Explain submission details, dependencies, evaluation keys..."
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-blue-500 focus:bg-white transition"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                  Due Date Deadline *
-                </label>
-                <input
-                  type="datetime-local"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-blue-500 focus:bg-white transition cursor-pointer"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setCreateModalOpen(false)}
-                  className="border border-slate-200 hover:bg-slate-50 text-slate-600 px-4 py-2 text-xs font-semibold rounded-lg transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={createAssignmentMutation.isPending}
-                  className="bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white px-4 py-2 text-xs font-semibold rounded-lg transition shadow-md shadow-blue-600/10 flex items-center justify-center gap-1.5"
-                >
-                  {createAssignmentMutation.isPending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    'Add Assignment'
-                  )}
-                </button>
-              </div>
-            </form>
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-border/60">
+            <button
+              type="button"
+              onClick={() => setCreateModalOpen(false)}
+              className="px-4 py-2 rounded-xl border border-border/80 text-xs font-bold text-foreground hover:bg-muted"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => createMutation.mutate()}
+              disabled={createMutation.isPending}
+              className="px-5 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-bold shadow-md hover:bg-primary/90"
+            >
+              {createMutation.isPending ? 'Publishing...' : 'Publish Assignment'}
+            </button>
           </div>
         </div>
-      )}
+      </Dialog>
 
-      {/* Grading Evaluation Modal */}
-      {gradeModalOpen && selectedSubmission && (
-        <div className="fixed inset-0 bg-black/55 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
-              <h3 className="font-bold text-sm text-slate-950">Grade Submission</h3>
-              <button
-                onClick={() => setGradeModalOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleGradeSubmit} className="p-6 space-y-4">
-              {gradeError && (
-                <div className="bg-red-50 border border-red-200 text-red-800 text-xs rounded-xl p-3 flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
-                  <span>{gradeError}</span>
-                </div>
+      {/* 4. GRADE SUBMISSION MODAL */}
+      <Dialog
+        isOpen={gradeModalOpen}
+        onClose={() => setGradeModalOpen(false)}
+        title={activeSubmission ? `Evaluate ${activeSubmission.studentName}'s Submission` : 'Grade Submission'}
+      >
+        <div className="space-y-4">
+          {activeSubmission && (
+            <div className="p-3.5 rounded-2xl bg-muted/50 border border-border text-xs space-y-1">
+              <div className="flex items-center justify-between font-bold">
+                <span>{activeSubmission.studentName} ({activeSubmission.rollNo})</span>
+                <span>Max Marks: {activeSubmission.maxMarks}</span>
+              </div>
+              {activeSubmission.attachmentName && (
+                <p className="text-muted-foreground">
+                  Attached file: <strong>{activeSubmission.attachmentName}</strong>
+                </p>
               )}
+            </div>
+          )}
 
-              <div className="bg-slate-50 p-3 border border-slate-200 rounded-xl text-xs space-y-1">
-                <span className="text-[9px] font-bold text-slate-400 uppercase">Student Name</span>
-                <span className="font-bold text-slate-900 block">
-                  {selectedSubmission.students?.first_name} {selectedSubmission.students?.last_name}
-                </span>
-              </div>
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-foreground">
+              Marks Awarded (0 to {activeSubmission?.maxMarks || 50})
+            </label>
+            <input
+              type="number"
+              step="0.5"
+              min="0"
+              max={activeSubmission?.maxMarks || 50}
+              value={gradeMarks}
+              onChange={(e) => setGradeMarks(e.target.value)}
+              placeholder="e.g. 45.0"
+              className="w-full px-3 py-2 rounded-xl font-mono text-xs font-bold bg-muted/40 border border-border text-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/40"
+            />
+          </div>
 
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                  Marks Obtained (Max: {activeAssignment?.max_marks}) *
-                </label>
-                <input
-                  type="number"
-                  placeholder="e.g. 18.5"
-                  value={gradeMarks}
-                  onChange={(e) => setGradeMarks(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-blue-500 focus:bg-white transition"
-                />
-              </div>
+          <div className="space-y-1">
+            <label className="text-xs font-bold text-foreground">
+              Feedback & Evaluation Remarks
+            </label>
+            <textarea
+              rows={3}
+              placeholder="Provide constructive feedback on algorithm correctness, efficiency, and code clarity..."
+              value={gradeFeedback}
+              onChange={(e) => setGradeFeedback(e.target.value)}
+              className="w-full p-3 rounded-xl bg-muted/40 border border-border text-xs text-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/40"
+            />
+          </div>
 
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-                  Advisor Comments & Feedback
-                </label>
-                <textarea
-                  rows={4}
-                  placeholder="Excellent socket handling, review threading parameters..."
-                  value={gradeFeedback}
-                  onChange={(e) => setGradeFeedback(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs focus:outline-none focus:border-blue-500 focus:bg-white transition"
-                />
-              </div>
+          {gradeError && (
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 text-xs font-semibold">
+              {gradeError}
+            </div>
+          )}
 
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setGradeModalOpen(false)}
-                  className="border border-slate-200 hover:bg-slate-50 text-slate-600 px-4 py-2 text-xs font-semibold rounded-lg transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={gradeSubmissionMutation.isPending}
-                  className="bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white px-4 py-2 text-xs font-semibold rounded-lg transition shadow-md shadow-blue-600/10 flex items-center justify-center gap-1.5"
-                >
-                  {gradeSubmissionMutation.isPending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    'Publish Grade'
-                  )}
-                </button>
-              </div>
-            </form>
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-border/60">
+            <button
+              type="button"
+              onClick={() => setGradeModalOpen(false)}
+              className="px-4 py-2 rounded-xl border border-border/80 text-xs font-bold text-foreground hover:bg-muted"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => gradeMutation.mutate()}
+              disabled={gradeMutation.isPending}
+              className="px-5 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-bold shadow-md hover:bg-primary/90"
+            >
+              {gradeMutation.isPending ? 'Saving Grade...' : 'Save Evaluation'}
+            </button>
           </div>
         </div>
-      )}
+      </Dialog>
     </div>
   );
 }

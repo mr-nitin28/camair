@@ -2,491 +2,546 @@
 
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/lib/supabase';
-import { useAppStore } from '@/lib/store';
-import { motion, AnimatePresence } from 'framer-motion';
+import {
+  AdminService,
+  type UnifiedApprovalItem,
+} from '@/lib/services/admin-service';
+import { PageHeader } from '@/components/ui/page-header';
+import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { Dialog } from '@/components/ui/dialog';
+import { StatusBadge } from '@/components/ui/status-badge';
 import {
   CheckSquare,
-  ArrowLeft,
   CheckCircle,
   XCircle,
+  Search,
+  Filter,
+  AlertTriangle,
+  Clock,
+  User,
+  Building,
   FileText,
   ExternalLink,
-  Loader2,
-  ChevronRight,
+  MessageSquare,
+  ShieldAlert,
 } from 'lucide-react';
-import Link from 'next/link';
-
-interface Student {
-  first_name: string;
-  last_name: string;
-  student_id: string;
-}
-
-interface LeaveRequest {
-  id: string;
-  student_id: string;
-  leave_type: 'Medical' | 'Personal' | 'On Duty' | 'Other';
-  start_date: string;
-  end_date: string;
-  reason: string;
-  attachment_url: string | null;
-  status: 'Pending' | 'Approved' | 'Rejected';
-  actioned_by: string | null;
-  actioned_at: string | null;
-  comments: string | null;
-  created_at: string;
-  students?: Student;
-}
-
-interface ServiceRequest {
-  id: string;
-  student_id: string;
-  request_type: 'Bonafide Certificate' | 'Character Certificate' | 'Transcript' | 'ID Card Reissue';
-  reason: string;
-  status: 'Pending' | 'Approved' | 'Completed' | 'Rejected';
-  comments: string | null;
-  attachment_url: string | null;
-  actioned_by: string | null;
-  actioned_at: string | null;
-  created_at: string;
-  students?: Student;
-}
 
 export default function ApprovalsQueuePage() {
-  const { admin } = useAppStore();
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<'leaves' | 'services'>('leaves');
-  
-  const [selectedLeave, setSelectedLeave] = useState<LeaveRequest | null>(null);
-  const [selectedService, setSelectedService] = useState<ServiceRequest | null>(null);
-  
-  const [comments, setComments] = useState('');
+  const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [urgencyFilter, setUrgencyFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('pending');
 
-  // Fetch Leave Requests
-  const { data: leaves, isLoading: loadingLeaves } = useQuery({
-    queryKey: ['admin-approvals-leaves'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('leave_requests')
-        .select('*, students(*)')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data as LeaveRequest[];
-    },
+  // Multi-selection state
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  // Bulk action modal
+  const [bulkActionType, setBulkActionType] = useState<'approve' | 'reject' | null>(null);
+  const [bulkComment, setBulkComment] = useState('');
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // Single item review modal
+  const [activeItem, setActiveItem] = useState<UnifiedApprovalItem | null>(null);
+  const [singleComment, setSingleComment] = useState('');
+
+  // Fetch approvals
+  const {
+    data: approvals,
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: ['admin-unified-approvals', categoryFilter, urgencyFilter, statusFilter, search],
+    queryFn: () =>
+      AdminService.getUnifiedApprovals({
+        category: categoryFilter,
+        urgency: urgencyFilter,
+        status: statusFilter,
+        search,
+      }),
   });
 
-  // Fetch Service Requests
-  const { data: services, isLoading: loadingServices } = useQuery({
-    queryKey: ['admin-approvals-services'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('service_requests')
-        .select('*, students(*)')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data as ServiceRequest[];
-    },
-  });
-
-  // Action Leave Mutation
-  const actionLeaveMutation = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: 'Approved' | 'Rejected' }) => {
-      const { error } = await supabase
-        .from('leave_requests')
-        .update({
-          status,
-          comments: comments.trim() || null,
-          actioned_by: admin?.name || 'Admin',
-          actioned_at: new Date().toISOString(),
-        })
-        .eq('id', id);
-
-      if (error) throw error;
-
-      await supabase.from('audit_logs').insert({
-        user_email: admin?.name || 'Admin',
-        role: admin?.role || 'Super Admin',
-        action: `Processed leave request status: ${status}`,
-        affected_records: `leave_requests: ${id}`,
-      });
-    },
+  // Single Action Mutation
+  const singleActionMutation = useMutation({
+    mutationFn: ({ id, action, comment }: { id: string; action: 'approve' | 'reject'; comment: string }) =>
+      AdminService.actionApproval(id, action, comment),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-approvals-leaves'] });
-      setComments('');
-      setSelectedLeave(null);
+      queryClient.invalidateQueries({ queryKey: ['admin-unified-approvals'] });
+      setActiveItem(null);
+      setSingleComment('');
+      setActionError(null);
+    },
+    onError: (err: Error) => {
+      setActionError(err.message || 'Action failed.');
     },
   });
 
-  // Action Service Mutation
-  const actionServiceMutation = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: 'Approved' | 'Completed' | 'Rejected' }) => {
-      const { error } = await supabase
-        .from('service_requests')
-        .update({
-          status,
-          comments: comments.trim() || null,
-          actioned_by: admin?.name || 'Admin',
-          actioned_at: new Date().toISOString(),
-        })
-        .eq('id', id);
-
-      if (error) throw error;
-
-      await supabase.from('audit_logs').insert({
-        user_email: admin?.name || 'Admin',
-        role: admin?.role || 'Super Admin',
-        action: `Processed certificate service request status: ${status}`,
-        affected_records: `service_requests: ${id}`,
-      });
-    },
+  // Bulk Action Mutation
+  const bulkActionMutation = useMutation({
+    mutationFn: ({ ids, action, comment }: { ids: string[]; action: 'approve' | 'reject'; comment: string }) =>
+      AdminService.bulkActionApprovals(ids, action, comment),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin-approvals-services'] });
-      setComments('');
-      setSelectedService(null);
+      queryClient.invalidateQueries({ queryKey: ['admin-unified-approvals'] });
+      setSelectedIds([]);
+      setBulkActionType(null);
+      setBulkComment('');
+      setActionError(null);
+    },
+    onError: (err: Error) => {
+      setActionError(err.message || 'Bulk action failed.');
     },
   });
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'Approved':
-      case 'Completed':
-        return 'bg-emerald-500/10 border-emerald-250/20 text-emerald-800';
-      case 'Rejected':
-        return 'bg-red-500/10 border-red-250/20 text-red-800';
-      default:
-        return 'bg-amber-500/10 border-amber-250/20 text-amber-850';
+  const handleSelectAll = () => {
+    if (!approvals) return;
+    if (selectedIds.length === approvals.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(approvals.map((a) => a.id));
     }
   };
 
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleBulkSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bulkActionType) return;
+    if (!bulkComment.trim()) {
+      setActionError('Decision comment is mandatory for administrative audit records.');
+      return;
+    }
+    bulkActionMutation.mutate({
+      ids: selectedIds,
+      action: bulkActionType,
+      comment: bulkComment,
+    });
+  };
+
+  const handleSingleSubmit = (action: 'approve' | 'reject') => {
+    if (!activeItem) return;
+    if (!singleComment.trim()) {
+      setActionError('Decision comment is mandatory for administrative audit records.');
+      return;
+    }
+    singleActionMutation.mutate({
+      id: activeItem.id,
+      action,
+      comment: singleComment,
+    });
+  };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-64" />
+        <div className="h-12 w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)]" />
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="h-28 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4" />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (isError || !approvals) {
+    return (
+      <ErrorState
+        title="Failed to Load Approvals Queue"
+        message="Could not load unified administrative approvals."
+        onRetry={() => refetch()}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <Link href="/admin" className="text-xs text-slate-500 hover:text-indigo-650 font-extrabold flex items-center gap-1 mb-2">
-          <ArrowLeft className="w-3.5 h-3.5" /> Back to Dashboard
-        </Link>
-        <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 font-sans">Unified Approvals Board</h2>
-        <p className="text-slate-550 text-xs mt-1 font-semibold">
-          Approve or reject student leave requests, medical certificate logs, and official document re-issues.
-        </p>
-      </div>
+      <PageHeader
+        title="Unified Administrative Approvals Queue"
+        description="Consolidated review for student leaves, bonafide certificates, fee concessions, and doubt escalations."
+      />
 
-      {/* Tabs */}
-      <div className="flex gap-2 pb-1 border-b border-slate-200/60 font-semibold">
-        <button
-          onClick={() => {
-            setActiveTab('leaves');
-            setSelectedService(null);
-            setComments('');
-          }}
-          className={`px-4 py-2 text-xs font-extrabold border-b-2 transition ${
-            activeTab === 'leaves'
-              ? 'border-indigo-600 text-indigo-650'
-              : 'border-transparent text-slate-500 hover:text-slate-705'
-          }`}
-        >
-          Leave Applications ({leaves?.filter((l) => l.status === 'Pending').length || 0})
-        </button>
-        <button
-          onClick={() => {
-            setActiveTab('services');
-            setSelectedLeave(null);
-            setComments('');
-          }}
-          className={`px-4 py-2 text-xs font-extrabold border-b-2 transition ${
-            activeTab === 'services'
-              ? 'border-indigo-600 text-indigo-650'
-              : 'border-transparent text-slate-500 hover:text-slate-705'
-          }`}
-        >
-          Service Desk Tickets ({services?.filter((s) => s.status === 'Pending').length || 0})
-        </button>
-      </div>
+      {/* FILTER CONTROLS & SAVED FILTERS */}
+      <div className="p-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-sm space-y-3">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="relative w-full sm:w-80">
+            <Search className="w-4 h-4 text-[var(--text-muted)] absolute left-3 top-2.5" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search applicant or keyword..."
+              className="w-full pl-9 pr-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] text-xs text-[var(--text)]"
+            />
+          </div>
 
-      {/* Grid split view */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
-        {/* Left Side: Requests List */}
-        <div className="lg:col-span-2 space-y-3.5 h-[65vh] overflow-y-auto pr-1">
-          {activeTab === 'leaves' ? (
-            loadingLeaves ? (
-              <div className="p-8 text-center text-slate-500 font-bold"><Loader2 className="w-6 h-6 animate-spin mx-auto text-indigo-600" /></div>
-            ) : leaves && leaves.length > 0 ? (
-              leaves.map((l) => (
-                <div
-                  key={l.id}
-                  onClick={() => {
-                    setSelectedLeave(l);
-                    setComments(l.comments || '');
-                  }}
-                  className={`bg-white/50 backdrop-blur-md border p-5 rounded-2xl cursor-pointer hover:border-slate-350 transition flex flex-col sm:flex-row justify-between gap-4 shadow-sm ${
-                    selectedLeave?.id === l.id ? 'border-indigo-600 shadow' : 'border-slate-200/80'
-                  }`}
-                >
-                  <div className="space-y-2 font-semibold">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`text-[9.5px] font-extrabold uppercase tracking-wider px-2 py-0.5 border rounded-full ${getStatusBadge(l.status)}`}>
-                        {l.status}
-                      </span>
-                      <span className="bg-white border border-slate-200 text-slate-700 text-[9.5px] font-extrabold px-2 py-0.5 rounded-full uppercase">
-                        {l.leave_type} Leave
-                      </span>
-                      <span className="text-[10px] text-slate-505 font-bold font-sans">
-                        Applied: {new Date(l.created_at).toLocaleDateString()}
-                      </span>
-                    </div>
+          <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs font-semibold"
+            >
+              <option value="all">All Request Categories</option>
+              <option value="leave">Student Leave Requests</option>
+              <option value="service_certificate">Service Certificates</option>
+              <option value="fee_concession">Fee Concessions</option>
+            </select>
 
-                    <h3 className="text-xs font-extrabold text-slate-900 leading-tight">
-                      {l.students?.first_name} {l.students?.last_name} ({l.students?.student_id})
-                    </h3>
+            <select
+              value={urgencyFilter}
+              onChange={(e) => setUrgencyFilter(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs font-semibold"
+            >
+              <option value="all">All Urgency Levels</option>
+              <option value="urgent">Urgent / Attendance Risk</option>
+              <option value="normal">Normal Priority</option>
+            </select>
 
-                    <p className="text-xs text-slate-500 line-clamp-1 leading-relaxed font-semibold">
-                      Reason: "{l.reason}"
-                    </p>
-                  </div>
-
-                  <span className="text-[10px] text-indigo-650 hover:text-indigo-750 font-extrabold flex items-center gap-0.5 self-end sm:self-auto">
-                    Audit dossier <ChevronRight className="w-3.5 h-3.5" />
-                  </span>
-                </div>
-              ))
-            ) : (
-              <div className="text-center py-12 text-slate-500 text-xs font-bold">No leave requests logged.</div>
-            )
-          ) : (
-            loadingServices ? (
-              <div className="p-8 text-center text-slate-500 font-bold"><Loader2 className="w-6 h-6 animate-spin mx-auto text-indigo-600" /></div>
-            ) : services && services.length > 0 ? (
-              services.map((s) => (
-                <div
-                  key={s.id}
-                  onClick={() => {
-                    setSelectedService(s);
-                    setComments(s.comments || '');
-                  }}
-                  className={`bg-white/50 backdrop-blur-md border p-5 rounded-2xl cursor-pointer hover:border-slate-350 transition flex flex-col sm:flex-row justify-between gap-4 shadow-sm ${
-                    selectedService?.id === s.id ? 'border-indigo-600 shadow' : 'border-slate-200/80'
-                  }`}
-                >
-                  <div className="space-y-2 font-semibold">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`text-[9.5px] font-extrabold uppercase tracking-wider px-2 py-0.5 border rounded-full ${getStatusBadge(s.status)}`}>
-                        {s.status}
-                      </span>
-                      <span className="bg-white border border-slate-200 text-slate-700 text-[9.5px] font-extrabold px-2 py-0.5 rounded-full uppercase">
-                        {s.request_type}
-                      </span>
-                      <span className="text-[10px] text-slate-505 font-bold font-sans">
-                        Raised: {new Date(s.created_at).toLocaleDateString()}
-                      </span>
-                    </div>
-
-                    <h3 className="text-xs font-extrabold text-slate-900 leading-tight">
-                      {s.students?.first_name} {s.students?.last_name} ({s.students?.student_id})
-                    </h3>
-
-                    <p className="text-xs text-slate-500 line-clamp-1 leading-relaxed font-semibold">
-                      Reason: "{s.reason}"
-                    </p>
-                  </div>
-
-                  <span className="text-[10px] text-indigo-650 hover:text-indigo-755 font-extrabold flex items-center gap-0.5 self-end sm:self-auto">
-                    Audit dossier <ChevronRight className="w-3.5 h-3.5" />
-                  </span>
-                </div>
-              ))
-            ) : (
-              <div className="text-center py-12 text-slate-500 text-xs font-bold">No service requests logged.</div>
-            )
-          )}
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs font-semibold"
+            >
+              <option value="pending">Pending Action</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+              <option value="all">All Statuses</option>
+            </select>
+          </div>
         </div>
 
-        {/* Right Side: Action Detailed Board */}
-        <div className="lg:col-span-1">
-          <AnimatePresence mode="wait">
-            {selectedLeave && (
-              <motion.div
-                key={selectedLeave.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 10 }}
-                className="bg-white/50 backdrop-blur-md border border-slate-200/80 rounded-2xl p-6 shadow-sm space-y-5"
-              >
-                <div className="border-b border-slate-200/60 pb-4">
-                  <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider font-sans">Leave dossier review</h3>
-                  <p className="text-[10px] text-slate-500 mt-0.5 font-sans font-bold">#{selectedLeave.id.slice(0, 8)}</p>
+        {/* Saved Filter Shortcuts */}
+        <div className="flex items-center gap-2 pt-2 border-t border-[var(--border)] text-xs">
+          <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-wider">
+            Saved Filters:
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setUrgencyFilter('urgent');
+              setStatusFilter('pending');
+              setCategoryFilter('all');
+            }}
+            className="px-2 py-0.5 rounded-lg border border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-300 font-bold"
+          >
+            Urgent Leaves & Risks
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setCategoryFilter('service_certificate');
+              setStatusFilter('pending');
+              setUrgencyFilter('all');
+            }}
+            className="px-2 py-0.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)] font-semibold"
+          >
+            Certificates Only
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setCategoryFilter('fee_concession');
+              setStatusFilter('pending');
+              setUrgencyFilter('all');
+            }}
+            className="px-2 py-0.5 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)] font-semibold"
+          >
+            Fee Concessions
+          </button>
+        </div>
+      </div>
+
+      {/* BULK ACTION BAR */}
+      {selectedIds.length > 0 && (
+        <div className="p-3 px-4 rounded-xl bg-indigo-50 border border-indigo-200 dark:bg-indigo-950/30 dark:border-indigo-900 text-xs flex items-center justify-between">
+          <div className="flex items-center gap-2 text-indigo-950 dark:text-indigo-200 font-extrabold">
+            <CheckSquare className="w-4 h-4 text-indigo-600" />
+            <span>{selectedIds.length} item(s) selected for bulk review</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setBulkActionType('reject');
+                setActionError(null);
+              }}
+              className="px-3 py-1.5 rounded-xl font-bold bg-rose-600 text-white hover:bg-rose-700 transition-colors cursor-pointer"
+            >
+              Reject Selected
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setBulkActionType('approve');
+                setActionError(null);
+              }}
+              className="px-3 py-1.5 rounded-xl font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors cursor-pointer"
+            >
+              Approve Selected
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* APPROVALS LIST */}
+      {approvals.length === 0 ? (
+        <EmptyState
+          title="Approval Queue Clear"
+          description="There are no pending requests matching your current filter settings."
+        />
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between px-2 text-xs font-semibold text-[var(--text-muted)]">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={selectedIds.length === approvals.length && approvals.length > 0}
+                onChange={handleSelectAll}
+                className="rounded border-[var(--border)] text-[var(--accent)]"
+              />
+              <span>Select All In Queue</span>
+            </label>
+            <span>Showing {approvals.length} item(s)</span>
+          </div>
+
+          {approvals.map((item) => (
+            <div
+              key={item.id}
+              className="p-5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] hover:border-[var(--border-strong)] transition-all shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4"
+            >
+              <div className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(item.id)}
+                  onChange={() => handleToggleSelect(item.id)}
+                  className="rounded border-[var(--border)] text-[var(--accent)] mt-1"
+                />
+
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded ${
+                        item.urgency === 'urgent'
+                          ? 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400'
+                          : 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-400'
+                      }`}
+                    >
+                      {item.category.replace('_', ' ')}
+                    </span>
+                    {item.urgency === 'urgent' && (
+                      <span className="text-[10px] font-extrabold text-rose-600 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" /> Urgent Attention
+                      </span>
+                    )}
+                    <StatusBadge
+                      status={
+                        item.status === 'approved'
+                          ? 'success'
+                          : item.status === 'rejected'
+                          ? 'danger'
+                          : 'warning'
+                      }
+                      label={item.status}
+                    />
+                  </div>
+
+                  <h4 className="text-sm font-extrabold text-[var(--text)] tracking-tight">
+                    {item.title}
+                  </h4>
+
+                  <p className="text-xs text-[var(--text-muted)] line-clamp-1 max-w-xl">
+                    {item.details}
+                  </p>
+
+                  <div className="flex items-center gap-3 text-xs text-[var(--text-muted)] pt-1">
+                    <span className="font-semibold text-[var(--text)]">{item.applicantName} ({item.applicantCode})</span>
+                    <span>•</span>
+                    <span>Dept: {item.department}</span>
+                    <span>•</span>
+                    <span>{new Date(item.submittedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
+                  </div>
                 </div>
+              </div>
 
-                <div className="space-y-4 font-semibold text-xs text-slate-700">
-                  <div>
-                    <span className="text-[9.5px] font-extrabold text-slate-500 uppercase">Student applicant</span>
-                    <h4 className="text-xs font-extrabold text-slate-900 mt-1">
-                      {selectedLeave.students?.first_name} {selectedLeave.students?.last_name}
-                    </h4>
-                    <span className="text-[10px] text-slate-500 mt-0.5 block font-sans font-semibold">{selectedLeave.students?.student_id}</span>
-                  </div>
+              <div className="flex items-center gap-2 shrink-0 w-full md:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveItem(item);
+                    setSingleComment('');
+                    setActionError(null);
+                  }}
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-bold border border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)] hover:border-[var(--accent)] transition-all cursor-pointer"
+                >
+                  Inspect & Decide
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
-                  <div>
-                    <span className="text-[9.5px] font-extrabold text-slate-500 uppercase">Duration</span>
-                    <p className="text-xs font-bold text-slate-800 mt-1">
-                      {new Date(selectedLeave.start_date).toLocaleDateString()} - {new Date(selectedLeave.end_date).toLocaleDateString()}
-                    </p>
-                  </div>
-
-                  <div>
-                    <span className="text-[9.5px] font-extrabold text-slate-500 uppercase">Reason</span>
-                    <p className="text-xs text-slate-500 bg-white/40 border border-slate-200/60 p-3 rounded-xl mt-1 leading-relaxed font-semibold">
-                      "{selectedLeave.reason}"
-                    </p>
-                  </div>
-
-                  {selectedLeave.attachment_url && (
-                    <div>
-                      <span className="text-[9.5px] font-extrabold text-slate-500 uppercase block mb-1.5">Document Attachment</span>
-                      <a
-                        href={selectedLeave.attachment_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center justify-between p-2.5 bg-indigo-500/10 border border-indigo-250/20 text-indigo-850 hover:bg-indigo-500/20 rounded-xl transition shadow-sm font-extrabold"
-                      >
-                        <span className="text-xs flex items-center gap-1.5">
-                          <FileText className="w-4 h-4 text-indigo-650" /> Medical Certificate
-                        </span>
-                        <ExternalLink className="w-3.5 h-3.5 text-indigo-650" />
-                      </a>
-                    </div>
-                  )}
-
-                  {selectedLeave.status === 'Pending' ? (
-                    <div className="space-y-3.5 pt-3 border-t border-slate-200/60">
-                      <div>
-                        <label className="text-[9.5px] font-extrabold text-slate-500 uppercase block mb-1">Approval remarks</label>
-                        <textarea
-                          rows={3}
-                          value={comments}
-                          onChange={(e) => setComments(e.target.value)}
-                          placeholder="Provide approval comments, reason for rejection..."
-                          className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition resize-none font-bold"
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <button
-                          onClick={() => actionLeaveMutation.mutate({ id: selectedLeave.id, status: 'Rejected' })}
-                          disabled={actionLeaveMutation.isPending}
-                          className="border border-red-200/60 bg-red-500/10 hover:bg-red-500/20 text-red-850 font-extrabold text-xs py-2 px-4 rounded-xl transition flex items-center justify-center gap-1"
-                        >
-                          <XCircle className="w-4 h-4 text-red-655" /> Reject
-                        </button>
-                        <button
-                          onClick={() => actionLeaveMutation.mutate({ id: selectedLeave.id, status: 'Approved' })}
-                          disabled={actionLeaveMutation.isPending}
-                          className="bg-indigo-600 hover:bg-indigo-705 text-white font-extrabold text-xs py-2 px-4 rounded-xl transition flex items-center justify-center gap-1 shadow-sm"
-                        >
-                          <CheckCircle className="w-4 h-4" /> Approve
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="p-3 bg-white/40 border border-slate-200/60 rounded-xl text-xs space-y-1.5 text-slate-500">
-                      <span className="block font-extrabold text-slate-800">Reviewed Log:</span>
-                      <div>Reviewed by: <span className="font-extrabold text-slate-900">{selectedLeave.actioned_by}</span></div>
-                      {selectedLeave.comments && <div>Remarks: <span className="font-extrabold text-slate-900">"{selectedLeave.comments}"</span></div>}
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            )}
-
-            {selectedService && (
-              <motion.div
-                key={selectedService.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 10 }}
-                className="bg-white/50 backdrop-blur-md border border-slate-200/80 rounded-2xl p-6 shadow-sm space-y-5"
-              >
-                <div className="border-b border-slate-200/60 pb-4">
-                  <h3 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider font-sans">Service request review</h3>
-                  <p className="text-[10px] text-slate-500 mt-0.5 font-sans font-bold">#{selectedService.id.slice(0, 8)}</p>
-                </div>
-
-                <div className="space-y-4 font-semibold text-xs text-slate-700">
-                  <div>
-                    <span className="text-[9.5px] font-extrabold text-slate-500 uppercase">Student applicant</span>
-                    <h4 className="text-xs font-extrabold text-slate-900 mt-1">
-                      {selectedService.students?.first_name} {selectedService.students?.last_name}
-                    </h4>
-                    <span className="text-[10px] text-slate-500 mt-0.5 block font-sans font-semibold">{selectedService.students?.student_id}</span>
-                  </div>
-
-                  <div>
-                    <span className="text-[9.5px] font-extrabold text-slate-500 uppercase">Request Type</span>
-                    <p className="text-xs font-bold text-slate-800 mt-1">{selectedService.request_type}</p>
-                  </div>
-
-                  <div>
-                    <span className="text-[9.5px] font-extrabold text-slate-500 uppercase">Reason</span>
-                    <p className="text-xs text-slate-500 bg-white/40 border border-slate-200/60 p-3 rounded-xl mt-1 leading-relaxed font-semibold">
-                      "{selectedService.reason}"
-                    </p>
-                  </div>
-
-                  {selectedService.status === 'Pending' ? (
-                    <div className="space-y-3.5 pt-3 border-t border-slate-200/60">
-                      <div>
-                        <label className="text-[9.5px] font-extrabold text-slate-500 uppercase block mb-1">Approval remarks</label>
-                        <textarea
-                          rows={3}
-                          value={comments}
-                          onChange={(e) => setComments(e.target.value)}
-                          placeholder="Provide approval comments or update status..."
-                          className="w-full bg-white/40 border border-slate-200/60 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-indigo-500 transition resize-none font-bold"
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <button
-                          onClick={() => actionServiceMutation.mutate({ id: selectedService.id, status: 'Rejected' })}
-                          disabled={actionServiceMutation.isPending}
-                          className="border border-red-200/60 bg-red-500/10 hover:bg-red-500/20 text-red-855 font-extrabold text-xs py-2 px-4 rounded-xl transition flex items-center justify-center gap-1"
-                        >
-                          <XCircle className="w-4 h-4 text-red-655" /> Reject
-                        </button>
-                        <button
-                          onClick={() => actionServiceMutation.mutate({ id: selectedService.id, status: 'Completed' })}
-                          disabled={actionServiceMutation.isPending}
-                          className="bg-indigo-600 hover:bg-indigo-705 text-white font-extrabold text-xs py-2 px-4 rounded-xl transition flex items-center justify-center gap-1 shadow-sm"
-                        >
-                          <CheckCircle className="w-4 h-4" /> Complete
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="p-3 bg-white/40 border border-slate-200/60 rounded-xl text-xs space-y-1.5 text-slate-500">
-                      <span className="block font-extrabold text-slate-800">Processed Log:</span>
-                      <div>Processed by: <span className="font-extrabold text-slate-900">{selectedService.actioned_by}</span></div>
-                      {selectedService.comments && <div>Remarks: <span className="font-extrabold text-slate-900">"{selectedService.comments}"</span></div>}
-                    </div>
-                  )}
-                </div>
-              </motion.div>
-            )}
-
-            {!selectedLeave && !selectedService && (
-              <div className="bg-white/50 border border-dashed border-slate-200/80 rounded-2xl p-8 text-center text-slate-500 h-64 flex flex-col items-center justify-center shadow-sm font-bold">
-                <CheckSquare className="w-10 h-10 text-slate-400 mb-2 stroke-[1.5] animate-pulse" />
-                <h4 className="text-xs font-extrabold text-slate-700">No application selected</h4>
-                <p className="text-[10px] text-slate-555 max-w-xs mt-1 font-semibold">
-                  Click on any request in the left list queue to audit details and execute approval actions.
-                </p>
+      {/* SINGLE ITEM REVIEW DIALOG */}
+      {activeItem && (
+        <Dialog
+          isOpen={true}
+          onClose={() => setActiveItem(null)}
+          title={`Review Request: ${activeItem.title}`}
+          description={`Submitted by ${activeItem.applicantName} (${activeItem.applicantCode})`}
+          className="max-w-xl"
+        >
+          <div className="space-y-4">
+            {actionError && (
+              <div className="p-3 rounded-xl bg-rose-50 text-rose-700 text-xs font-bold">
+                {actionError}
               </div>
             )}
-          </AnimatePresence>
-        </div>
-      </div>
+
+            <div className="p-3.5 rounded-xl bg-[var(--surface-2)] text-xs space-y-2">
+              <div className="flex justify-between">
+                <span className="text-[var(--text-muted)]">Applicant:</span>
+                <span className="font-bold text-[var(--text)]">{activeItem.applicantName} ({activeItem.applicantCode})</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[var(--text-muted)]">Department & Role:</span>
+                <span className="font-bold text-[var(--text)]">{activeItem.department} • {activeItem.applicantRole}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[var(--text-muted)]">Urgency:</span>
+                <span className="font-bold uppercase text-rose-600">{activeItem.urgency}</span>
+              </div>
+            </div>
+
+            <div>
+              <span className="text-xs font-bold text-[var(--text)] block mb-1">Request Details</span>
+              <p className="p-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)] leading-relaxed">
+                {activeItem.details}
+              </p>
+            </div>
+
+            {activeItem.attachmentUrl && (
+              <div>
+                <a
+                  href={activeItem.attachmentUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-[var(--accent)] hover:underline"
+                >
+                  <FileText className="w-4 h-4" />
+                  <span>Inspect Supporting Document Attachment</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            )}
+
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Administrative Decision Comment *
+              </label>
+              <textarea
+                rows={3}
+                required
+                value={singleComment}
+                onChange={(e) => setSingleComment(e.target.value)}
+                placeholder="Enter justification rationale for institutional audit trail..."
+                className="w-full p-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
+            </div>
+
+            <div className="pt-3 flex justify-between gap-2 border-t border-[var(--border)]">
+              <button
+                type="button"
+                onClick={() => setActiveItem(null)}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold text-[var(--text-muted)]"
+              >
+                Cancel
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={singleActionMutation.isPending}
+                  onClick={() => handleSingleSubmit('reject')}
+                  className="px-4 py-1.5 rounded-xl text-xs font-bold bg-rose-600 text-white hover:bg-rose-700"
+                >
+                  Reject Request
+                </button>
+                <button
+                  type="button"
+                  disabled={singleActionMutation.isPending}
+                  onClick={() => handleSingleSubmit('approve')}
+                  className="px-4 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700"
+                >
+                  Approve Request
+                </button>
+              </div>
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      {/* BULK ACTION CONFIRMATION DIALOG */}
+      {bulkActionType && (
+        <Dialog
+          isOpen={true}
+          onClose={() => setBulkActionType(null)}
+          title={`Bulk ${bulkActionType === 'approve' ? 'Approve' : 'Reject'} (${selectedIds.length} Requests)`}
+          description="Applies a unified administrative decision comment across all selected items."
+        >
+          <form onSubmit={handleBulkSubmit} className="space-y-4">
+            {actionError && (
+              <div className="p-3 rounded-xl bg-rose-50 text-rose-700 text-xs font-bold">
+                {actionError}
+              </div>
+            )}
+
+            <div>
+              <label className="text-xs font-bold text-[var(--text)] block mb-1">
+                Batch Justification Comment *
+              </label>
+              <textarea
+                rows={3}
+                required
+                value={bulkComment}
+                onChange={(e) => setBulkComment(e.target.value)}
+                placeholder="State reason for bulk action (mandatory for audit compliance)..."
+                className="w-full p-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]"
+              />
+            </div>
+
+            <div className="pt-3 flex justify-end gap-2 border-t border-[var(--border)]">
+              <button
+                type="button"
+                onClick={() => setBulkActionType(null)}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold text-[var(--text-muted)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={bulkActionMutation.isPending}
+                className={`px-4 py-1.5 rounded-xl text-xs font-bold text-white ${
+                  bulkActionType === 'approve'
+                    ? 'bg-emerald-600 hover:bg-emerald-700'
+                    : 'bg-rose-600 hover:bg-rose-700'
+                }`}
+              >
+                {bulkActionMutation.isPending
+                  ? 'Processing...'
+                  : `Confirm Bulk ${bulkActionType === 'approve' ? 'Approval' : 'Rejection'}`}
+              </button>
+            </div>
+          </form>
+        </Dialog>
+      )}
     </div>
   );
 }
