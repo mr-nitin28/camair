@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
 import { SidebarNav, type NavGroup } from './sidebar-nav';
 import { TopBar, type TopBarNotificationItem } from './top-bar';
 import { BottomTabBar, type TabBarItem } from './bottom-tab-bar';
@@ -28,6 +30,7 @@ export interface AppShellProps {
   onMarkAsRead?: (id: string) => void;
   onMarkAllAsRead?: () => void;
   onNotificationClick?: (item: TopBarNotificationItem) => void;
+  onLogout?: () => void;
   density?: 'comfortable' | 'compact';
 }
 
@@ -46,8 +49,10 @@ export function AppShell({
   onMarkAsRead,
   onMarkAllAsRead,
   onNotificationClick,
+  onLogout,
   density = 'comfortable',
 }: AppShellProps) {
+  const router = useRouter();
   const [isRail, setIsRail] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
@@ -80,6 +85,26 @@ export function AppShell({
     });
   };
 
+  const handleDefaultLogout = async () => {
+    if (onLogout) {
+      onLogout();
+      return;
+    }
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+    } catch {
+      // Offline / demo fallback
+    }
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('mock_user_role');
+      localStorage.removeItem('campusos_session');
+    }
+    router.push('/login');
+  };
+
+  const activeLogout = onLogout || handleDefaultLogout;
+
   return (
     <div
       data-role={role}
@@ -94,6 +119,8 @@ export function AppShell({
             isCollapsed={isRail}
             onToggleCollapse={handleToggleRail}
             roleTitle={roleTitle}
+            user={user}
+            onLogout={activeLogout}
           />
         </div>
 
@@ -111,6 +138,8 @@ export function AppShell({
               isCollapsed={false}
               onToggleCollapse={() => setIsMobileMenuOpen(false)}
               roleTitle={roleTitle}
+              user={user}
+              onLogout={activeLogout}
               className="border-none w-full"
             />
           </div>
@@ -130,6 +159,7 @@ export function AppShell({
             onMarkAsRead={onMarkAsRead}
             onMarkAllAsRead={onMarkAllAsRead}
             onNotificationClick={onNotificationClick}
+            onLogout={activeLogout}
           />
 
           {/* Scrollable Page Canvas */}

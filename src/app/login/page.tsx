@@ -2,26 +2,46 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
-import { motion, AnimatePresence } from 'framer-motion';
-import { GraduationCap, Mail, Lock, ArrowRight, AlertCircle, Loader2, User } from 'lucide-react';
+import Link from 'next/link';
+import {
+  GraduationCap,
+  Mail,
+  Lock,
+  ArrowRight,
+  AlertCircle,
+  Loader2,
+  User,
+  Eye,
+  EyeOff,
+  ShieldCheck,
+  Building2,
+} from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
   const [demoFacultyLoading, setDemoFacultyLoading] = useState(false);
   const [demoAdminLoading, setDemoAdminLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Check if already logged in, redirect to dashboard, faculty portal, or admin portal
+  // Ensure clean light mode and prefetch portals
   useEffect(() => {
+    const root = document.documentElement;
+    const wasDark = root.classList.contains('dark');
+    if (wasDark) {
+      root.classList.remove('dark');
+      root.removeAttribute('data-theme');
+    }
+
     // Prefetch all portals for instant navigation
     router.prefetch('/dashboard');
     router.prefetch('/faculty');
     router.prefetch('/admin');
+    router.prefetch('/register');
 
     const role = typeof window !== 'undefined' ? localStorage.getItem('mock_user_role') : null;
     if (role) {
@@ -33,6 +53,14 @@ export default function LoginPage() {
         router.push('/dashboard');
       }
     }
+
+    return () => {
+      // Restore dark theme if previously chosen by user when leaving auth page
+      if (typeof window !== 'undefined' && localStorage.getItem('theme') === 'dark') {
+        root.classList.add('dark');
+        root.setAttribute('data-theme', 'dark');
+      }
+    };
   }, [router]);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -45,6 +73,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
+      const { createClient } = await import('@/lib/supabase/client');
       const supabase = createClient();
       const { data, error: authError } = await supabase.auth.signInWithPassword({
         email,
@@ -118,6 +147,7 @@ export default function LoginPage() {
     setDemoLoading(true);
     localStorage.setItem('mock_user_role', 'student');
     try {
+      const { createClient } = await import('@/lib/supabase/client');
       const supabase = createClient();
       await supabase.auth.signInWithPassword({
         email: 'student@campusos.dev',
@@ -134,6 +164,7 @@ export default function LoginPage() {
     setDemoFacultyLoading(true);
     localStorage.setItem('mock_user_role', 'faculty');
     try {
+      const { createClient } = await import('@/lib/supabase/client');
       const supabase = createClient();
       await supabase.auth.signInWithPassword({
         email: 'faculty@campusos.dev',
@@ -150,6 +181,7 @@ export default function LoginPage() {
     setDemoAdminLoading(true);
     localStorage.setItem('mock_user_role', 'admin');
     try {
+      const { createClient } = await import('@/lib/supabase/client');
       const supabase = createClient();
       await supabase.auth.signInWithPassword({
         email: 'admin@campusos.dev',
@@ -162,86 +194,91 @@ export default function LoginPage() {
   };
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-slate-950 text-white relative overflow-hidden px-4">
-      {/* Background Blobs */}
-      <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] rounded-full bg-indigo-900/20 blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] rounded-full bg-indigo-900/10 blur-[100px] pointer-events-none" />
+    <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-white to-indigo-50/50 text-slate-900 relative overflow-hidden px-4 py-12">
+      {/* Ambient Classic Light Gradient Orbs */}
+      <div className="absolute -top-32 -left-32 w-80 h-80 rounded-full bg-indigo-200/40 blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-32 -right-32 w-80 h-80 rounded-full bg-blue-200/40 blur-3xl pointer-events-none" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[520px] h-[520px] rounded-full bg-indigo-100/30 blur-3xl pointer-events-none" />
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="w-full max-w-md bg-slate-900/60 backdrop-blur-xl border border-slate-800 rounded-2xl p-8 shadow-2xl relative z-10"
-      >
+      {/* Subtle Grid Accent Pattern */}
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#e2e8f033_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f033_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none" />
+
+      <div className="w-full max-w-md bg-white/95 backdrop-blur-xl border border-slate-200/90 rounded-2xl p-7 sm:p-9 shadow-xl shadow-slate-200/60 relative z-10 transition-all duration-300">
         {/* Top Header */}
         <div className="flex flex-col items-center mb-8 text-center">
-          <div className="w-12 h-12 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-600/30 mb-4">
-            <GraduationCap className="w-7 h-7 text-white" />
+          <div className="w-13 h-13 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-indigo-600/25 mb-4 text-white">
+            <GraduationCap className="w-7 h-7" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">CampusOS</h1>
-          <p className="text-sm text-slate-400 mt-1">Unified Campus OS</p>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">CampusOS</h1>
+          <p className="text-xs sm:text-sm text-slate-500 mt-1 font-medium">
+            Unified Campus Operating System
+          </p>
         </div>
 
         {/* Error Message */}
-        <AnimatePresence>
-          {error && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="mb-6 bg-red-950/50 border border-red-800/60 text-red-200 rounded-lg p-3 flex items-start gap-2 text-sm"
-            >
-              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-red-400" />
-              <span>{error}</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {error && (
+          <div className="mb-5 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl p-3 flex items-start gap-2.5 text-xs font-medium transition-all">
+            <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-rose-500" />
+            <span>{error}</span>
+          </div>
+        )}
 
         {/* Credentials Form */}
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
               Email / Campus ID
             </label>
             <div className="relative">
-              <Mail className="absolute left-3 top-3.5 w-4 h-4 text-slate-500" />
+              <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
               <input
                 type="email"
-                placeholder="student@campusos.dev / faculty@campusos.dev"
+                placeholder="student@campusos.dev"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2.5 pl-10 pr-4 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
-                disabled={loading || demoLoading || demoFacultyLoading}
+                className="w-full bg-white border border-slate-200 hover:border-slate-300 rounded-xl py-2.5 pl-10 pr-4 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/15 transition-all shadow-xs"
+                disabled={loading || demoLoading || demoFacultyLoading || demoAdminLoading}
+                required
               />
             </div>
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider">
                 Password
               </label>
-              <a href="#" className="text-xs text-indigo-400 hover:text-indigo-300 hover:underline transition">
+              <a href="#" className="text-xs font-medium text-indigo-600 hover:text-indigo-700 hover:underline transition">
                 Forgot password?
               </a>
             </div>
             <div className="relative">
-              <Lock className="absolute left-3 top-3.5 w-4 h-4 text-slate-500" />
+              <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
               <input
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg py-2.5 pl-10 pr-4 text-sm text-white placeholder-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
+                className="w-full bg-white border border-slate-200 hover:border-slate-300 rounded-xl py-2.5 pl-10 pr-10 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/15 transition-all shadow-xs"
                 disabled={loading || demoLoading || demoFacultyLoading || demoAdminLoading}
+                required
               />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-md transition-colors"
+                tabIndex={-1}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
             </div>
           </div>
 
           <button
             type="submit"
             disabled={loading || demoLoading || demoFacultyLoading || demoAdminLoading}
-            className="w-full bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-medium text-sm rounded-lg py-2.5 flex items-center justify-center gap-1.5 transition-all shadow-lg shadow-indigo-600/10 hover:shadow-indigo-600/20 disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+            className="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold text-sm rounded-xl py-3 flex items-center justify-center gap-2 transition-all shadow-md shadow-indigo-600/20 hover:shadow-lg hover:shadow-indigo-600/30 disabled:opacity-50 disabled:cursor-not-allowed mt-2"
           >
             {loading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -255,25 +292,25 @@ export default function LoginPage() {
 
         {/* Divider */}
         <div className="relative my-6 flex items-center justify-center">
-          <div className="absolute inset-0 w-full border-t border-slate-800" />
-          <span className="relative z-10 px-3 bg-slate-900/60 text-xs font-semibold uppercase text-slate-500 tracking-wider">
+          <div className="absolute inset-0 w-full border-t border-slate-200" />
+          <span className="relative z-10 px-3 bg-white text-[11px] font-semibold uppercase text-slate-400 tracking-wider">
             Evaluation Access
           </span>
         </div>
 
         {/* Quick Demo Access Grid */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 gap-2.5">
           <button
             type="button"
             onClick={handleDemoLogin}
             disabled={loading || demoLoading || demoFacultyLoading || demoAdminLoading}
-            className="w-full bg-slate-950 border border-indigo-500/20 hover:border-indigo-500 hover:bg-slate-900 active:bg-slate-950 text-indigo-400 hover:text-indigo-300 font-medium text-xs rounded-lg py-2.5 flex items-center justify-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed shadow-inner"
+            className="w-full bg-slate-50/80 hover:bg-indigo-50/80 border border-slate-200 hover:border-indigo-300 text-slate-700 hover:text-indigo-700 font-semibold text-xs rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             {demoLoading ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
             ) : (
               <>
-                <GraduationCap className="w-4.5 h-4.5" />
+                <GraduationCap className="w-4 h-4 text-indigo-600" />
                 Student
               </>
             )}
@@ -283,13 +320,13 @@ export default function LoginPage() {
             type="button"
             onClick={handleDemoFacultyLogin}
             disabled={loading || demoLoading || demoFacultyLoading || demoAdminLoading}
-            className="w-full bg-slate-950 border border-blue-500/20 hover:border-blue-500 hover:bg-slate-900 active:bg-slate-950 text-blue-400 hover:text-blue-300 font-medium text-xs rounded-lg py-2.5 flex items-center justify-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed shadow-inner"
+            className="w-full bg-slate-50/80 hover:bg-teal-50/80 border border-slate-200 hover:border-teal-300 text-slate-700 hover:text-teal-700 font-semibold text-xs rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             {demoFacultyLoading ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-600" />
             ) : (
               <>
-                <User className="w-4.5 h-4.5" />
+                <User className="w-4 h-4 text-teal-600" />
                 Faculty
               </>
             )}
@@ -299,23 +336,41 @@ export default function LoginPage() {
             type="button"
             onClick={handleDemoAdminLogin}
             disabled={loading || demoLoading || demoFacultyLoading || demoAdminLoading}
-            className="w-full bg-slate-950 border border-slate-700/25 hover:border-slate-500 hover:bg-slate-900 active:bg-slate-950 text-slate-400 hover:text-slate-200 font-medium text-xs rounded-lg py-2.5 flex items-center justify-center gap-1.5 transition disabled:opacity-50 disabled:cursor-not-allowed shadow-inner"
+            className="w-full bg-slate-50/80 hover:bg-slate-100 border border-slate-200 hover:border-slate-300 text-slate-700 hover:text-slate-900 font-semibold text-xs rounded-xl py-2.5 flex items-center justify-center gap-1.5 transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             {demoAdminLoading ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-600" />
             ) : (
               <>
-                <User className="w-4.5 h-4.5 text-slate-400" />
+                <Building2 className="w-4 h-4 text-slate-600" />
                 Admin
               </>
             )}
           </button>
         </div>
 
-        <p className="text-center text-[10px] text-slate-500 mt-6">
-          Use the demo buttons to sign in with seeded student, faculty, or admin credentials.
+        <p className="text-center text-[11px] text-slate-500 mt-5">
+          One-click evaluation using seeded student, faculty, or administrator credentials.
         </p>
-      </motion.div>
+
+        {/* Register Navigation Row */}
+        <div className="mt-6 pt-5 border-t border-slate-100 text-center text-xs text-slate-600">
+          <span>Don&apos;t have an account?</span>{' '}
+          <Link
+            href="/register"
+            className="font-semibold text-indigo-600 hover:text-indigo-700 hover:underline transition"
+          >
+            Create an account
+          </Link>
+        </div>
+
+        {/* Security Footnote */}
+        <div className="mt-4 flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
+          <ShieldCheck className="w-3.5 h-3.5 text-indigo-500/80" />
+          <span>CampusOS Security • Enterprise Role-Based Access Control</span>
+        </div>
+      </div>
     </main>
   );
 }
+

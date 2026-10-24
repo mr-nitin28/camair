@@ -25,3 +25,8 @@ export * from './bottom-tab-bar';
 export * from './top-bar';
 export * from './command-palette';
 export * from './app-shell';
+export * from './attendance-gauge';
+export * from './kpi-metric-card';
+export * from './speed-rollcall-roster';
+export * from './responsive-sheet-dialog';
+export * from './student-today-hero';

@@ -67,8 +67,8 @@ export async function middleware(request: NextRequest) {
   const isAdmin = role.includes('admin');
   const isFaculty = role.includes('faculty') || isAdmin;
 
-  // Root or login page dispatch to role workspace
-  if (pathname === '/' || pathname === '/login') {
+  // Root, login, or register page dispatch to role workspace
+  if (pathname === '/' || pathname === '/login' || pathname === '/register') {
     const url = request.nextUrl.clone();
     if (isAdmin) {
       url.pathname = '/admin';

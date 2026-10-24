@@ -44,6 +44,7 @@ export interface TopBarProps {
   onMarkAsRead?: (id: string) => void;
   onMarkAllAsRead?: () => void;
   onNotificationClick?: (item: TopBarNotificationItem) => void;
+  onLogout?: () => void;
   className?: string;
 }
 
@@ -58,11 +59,14 @@ export function TopBar({
   onMarkAsRead,
   onMarkAllAsRead,
   onNotificationClick,
+  onLogout,
   className = '',
 }: TopBarProps) {
   const router = useRouter();
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
   const [isDark, setIsDark] = useState(() => {
     if (typeof window !== 'undefined') {
       return document.documentElement.classList.contains('dark');
@@ -83,15 +87,20 @@ export function TopBar({
   };
 
   useEffect(() => {
-    if (!isNotificationsOpen) return;
+    if (!isNotificationsOpen && !isUserMenuOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (dropdownRef.current && !dropdownRef.current.contains(target)) {
         setIsNotificationsOpen(false);
+      }
+      if (userMenuRef.current && !userMenuRef.current.contains(target)) {
+        setIsUserMenuOpen(false);
       }
     };
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setIsNotificationsOpen(false);
+        setIsUserMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -100,7 +109,7 @@ export function TopBar({
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleEscape);
     };
-  }, [isNotificationsOpen]);
+  }, [isNotificationsOpen, isUserMenuOpen]);
 
   const handleToggleNotifications = () => {
     setIsNotificationsOpen((prev) => !prev);
@@ -345,22 +354,64 @@ export function TopBar({
           )}
         </div>
 
-        {/* User Avatar + Role Badge */}
-        <div className="flex items-center gap-2.5 pl-2 border-l border-[var(--border)]">
-          <Avatar
-            name={user.name}
-            src={user.avatarUrl}
-            size="sm"
-            status="online"
-          />
-          <div className="hidden lg:block text-left">
-            <span className="text-xs font-bold text-[var(--text)] block truncate leading-tight">
-              {user.name}
-            </span>
-            <span className="text-[10px] font-semibold text-[var(--text-muted)] block truncate uppercase tracking-wider">
-              {user.role}
-            </span>
-          </div>
+        {/* User Avatar + Role Badge with Interactive Menu */}
+        <div className="relative" ref={userMenuRef}>
+          <button
+            type="button"
+            onClick={() => setIsUserMenuOpen((prev) => !prev)}
+            className="flex items-center gap-2.5 pl-2 py-1 pr-1.5 rounded-xl border-l border-[var(--border)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
+            aria-label="User account menu"
+            aria-expanded={isUserMenuOpen}
+          >
+            <Avatar
+              name={user.name}
+              src={user.avatarUrl}
+              size="sm"
+              status="online"
+            />
+            <div className="hidden lg:block text-left">
+              <span className="text-xs font-bold text-[var(--text)] block truncate leading-tight">
+                {user.name}
+              </span>
+              <span className="text-[10px] font-semibold text-[var(--text-muted)] block truncate uppercase tracking-wider">
+                {user.role}
+              </span>
+            </div>
+            <ChevronDown className="w-3.5 h-3.5 text-[var(--text-muted)] hidden sm:block" />
+          </button>
+
+          {/* User Profile Dropdown Menu */}
+          {isUserMenuOpen && (
+            <div className="absolute right-0 top-full mt-2 w-56 rounded-2xl bg-[var(--surface)] border border-[var(--border)] shadow-xl p-2 z-[var(--z-dropdown)] animate-in fade-in zoom-in-95 duration-150">
+              <div className="px-3 py-2 border-b border-[var(--border)]/60">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] block">
+                  Signed in as
+                </span>
+                <span className="text-xs font-bold text-[var(--text)] block truncate mt-0.5">
+                  {user.name}
+                </span>
+                <span className="text-[11px] text-[var(--text-muted)] block truncate font-mono mt-0.5">
+                  {user.email || user.role}
+                </span>
+              </div>
+
+              {onLogout && (
+                <div className="pt-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsUserMenuOpen(false);
+                      onLogout();
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-colors cursor-pointer text-left"
+                  >
+                    <LogOut className="w-4 h-4 shrink-0" />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </header>
