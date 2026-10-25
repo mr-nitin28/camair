@@ -32,6 +32,7 @@ import {
   Sparkles,
   ChevronRight,
   FileText,
+  User,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -204,54 +205,64 @@ export default function StudentDashboardPage() {
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.18 }}
-        className="p-4 md:p-5 rounded-2xl border border-[var(--border)] bg-gradient-to-r from-[var(--surface)] to-[var(--surface-2)] shadow-sm"
+        className="p-4 sm:p-5 rounded-2xl border border-[var(--border)] bg-gradient-to-r from-[var(--surface)] via-[var(--surface)] to-[var(--surface-2)] shadow-sm"
       >
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 xl:gap-6">
           {/* Next Class Focus */}
-          <div className="flex items-start md:items-center gap-3.5 min-w-0">
-            <div className="w-11 h-11 rounded-2xl bg-[var(--accent)]/10 border border-[var(--accent)]/20 flex items-center justify-center shrink-0">
-              <Clock className="w-5 h-5 text-[var(--accent)]" />
+          <div className="flex items-center gap-4 min-w-0 flex-1">
+            <div className="w-12 h-12 rounded-2xl bg-[var(--accent)]/10 border border-[var(--accent)]/20 flex items-center justify-center shrink-0 text-[var(--accent)] shadow-2xs">
+              <Clock className="w-5 h-5" />
             </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] font-extrabold uppercase tracking-wider text-[var(--accent)]">
+            <div className="min-w-0 flex-1">
+              {/* Header Tracker & Tag */}
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black uppercase tracking-wider text-[var(--accent)]">
                   Next Scheduled Class
                 </span>
                 {todayStrip.nextClass?.isNext && (
-                  <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                  <span className="px-1.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase bg-emerald-50 text-emerald-800 border border-emerald-200/80 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60 shadow-2xs">
                     Up Next
                   </span>
                 )}
               </div>
-              <h3 className="text-sm font-bold text-[var(--text)] truncate mt-0.5">
+
+              {/* Subject Title */}
+              <h3 className="text-base font-extrabold text-[var(--text)] tracking-tight leading-snug mt-0.5">
                 {todayStrip.nextClass ? `${todayStrip.nextClass.subjectCode}: ${todayStrip.nextClass.subjectName}` : 'No further classes scheduled today'}
               </h3>
+
+              {/* Class Metadata: Time, Room, Faculty */}
               {todayStrip.nextClass && (
-                <div className="flex items-center gap-3 text-xs text-[var(--text-muted)] mt-0.5 flex-wrap">
-                  <span className="flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    {todayStrip.nextClass.time}
+                <div className="flex items-center gap-2.5 sm:gap-3 text-xs text-[var(--text-muted)] mt-1 flex-wrap font-medium">
+                  <span className="inline-flex items-center gap-1.5 font-mono text-[var(--text)] font-semibold">
+                    <Clock className="w-3.5 h-3.5 text-[var(--accent)] shrink-0" />
+                    <span>{todayStrip.nextClass.time}</span>
                   </span>
-                  <span className="flex items-center gap-1">
-                    <MapPin className="w-3 h-3" />
-                    {todayStrip.nextClass.room}
+                  <span className="text-[var(--border-strong)] opacity-60 hidden sm:inline">•</span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
+                    <span>{todayStrip.nextClass.room}</span>
                   </span>
-                  <span className="hidden sm:inline">• {todayStrip.nextClass.facultyName}</span>
+                  <span className="text-[var(--border-strong)] opacity-60 hidden md:inline">•</span>
+                  <span className="hidden md:inline-flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
+                    <span>{todayStrip.nextClass.facultyName}</span>
+                  </span>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Due Items & Notices */}
-          <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+          {/* Quick Actions & Notices */}
+          <div className="flex items-center gap-2.5 flex-wrap shrink-0 xl:justify-end pt-3 xl:pt-0 border-t xl:border-t-0 xl:border-l xl:border-[var(--border)] xl:pl-6">
             {/* Fee Due Alert */}
             <Link
               href="/dashboard/fees"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-amber-300 dark:border-amber-900/60 bg-amber-50/50 dark:bg-amber-950/20 text-xs text-amber-800 dark:text-amber-200 hover:opacity-90 transition shadow-xs"
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-amber-200/90 bg-amber-50 text-amber-900 hover:bg-amber-100/70 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-950/60 transition shadow-2xs text-xs font-semibold shrink-0"
             >
-              <CreditCard className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
-              <span className="font-bold">Fee Due: Mar 31</span>
-              <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-amber-200/50 dark:bg-amber-800/40 font-extrabold">
+              <CreditCard className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400 shrink-0" />
+              <span className="font-bold text-amber-950 dark:text-amber-100">Fee Due: Mar 31</span>
+              <span className="font-mono text-[11px] px-1.5 py-0.5 rounded-md bg-amber-200/70 dark:bg-amber-900/60 font-bold text-amber-950 dark:text-amber-200 border border-amber-300/80 dark:border-amber-700/60">
                 {feeSummary.formattedBalance}
               </span>
             </Link>
@@ -259,28 +270,30 @@ export default function StudentDashboardPage() {
             {/* Pending Requests / Due Tasks */}
             <Link
               href="/dashboard/leaves"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] transition text-xs text-[var(--text)]"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] transition text-xs font-semibold text-[var(--text)] shadow-2xs shrink-0"
             >
               <CalendarDays className="w-3.5 h-3.5 text-[var(--accent)] shrink-0" />
-              <span className="font-semibold">{todayStrip.pendingItemsCount} Active Request{todayStrip.pendingItemsCount === 1 ? '' : 's'}</span>
+              <span>{todayStrip.pendingItemsCount} Active Request{todayStrip.pendingItemsCount === 1 ? '' : 's'}</span>
             </Link>
 
             {/* Urgent Notices */}
-            {todayStrip.urgentNotices.map((notice) => (
-              <Link
-                key={notice.id}
-                href="/dashboard/announcements"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] transition text-xs"
-              >
-                <Bell className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                <span className="font-semibold text-[var(--text)] truncate max-w-[170px]">
-                  {notice.title}
-                </span>
-                <span className="text-[10px] text-[var(--text-muted)] font-mono">
-                  {notice.timeAgo}
-                </span>
-              </Link>
-            ))}
+            {todayStrip.urgentNotices
+              .filter((notice) => notice.category !== 'Fee')
+              .map((notice) => (
+                <Link
+                  key={notice.id}
+                  href="/dashboard/announcements"
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-2)] transition text-xs font-semibold text-[var(--text)] shadow-2xs shrink-0"
+                >
+                  <Bell className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                  <span className="truncate max-w-[190px]">
+                    {notice.title}
+                  </span>
+                  <span className="text-[10px] text-[var(--text-muted)] font-mono shrink-0">
+                    {notice.timeAgo}
+                  </span>
+                </Link>
+              ))}
           </div>
         </div>
       </motion.div>
@@ -382,9 +395,9 @@ export default function StudentDashboardPage() {
                 size={140}
                 strokeWidth={12}
                 threshold={75}
-                label="Overall Attendance"
+                label="Attendance"
               />
-              <div className="mt-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/25 text-[10px] font-mono font-bold text-amber-700 dark:text-amber-300">
+              <div className="mt-3 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200/90 text-[10px] font-mono font-bold text-amber-900 dark:bg-amber-950/40 dark:border-amber-800/60 dark:text-amber-300 shadow-2xs">
                 <span className="w-2 h-2 rounded-full bg-amber-500"></span>
                 <span>Institutional Threshold: 75.00%</span>
               </div>
@@ -396,13 +409,13 @@ export default function StudentDashboardPage() {
 
           <div className="p-3 rounded-xl bg-[var(--surface-2)]/70 border border-[var(--border)]/60 text-xs">
             {overall.isShortage ? (
-              <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400 font-bold">
-                <AlertTriangle className="w-4 h-4 shrink-0" />
+              <div className="flex items-center gap-2 text-rose-800 dark:text-rose-300 font-bold">
+                <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
                 <span>Shortage Alert! You must attend {overall.classesNeededToRecover} consecutive classes to meet 75%.</span>
               </div>
             ) : (
-              <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-bold">
-                <CheckCircle2 className="w-4 h-4 shrink-0" />
+              <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-bold">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                 <span>Good Standing: Attendance is above 75% threshold.</span>
               </div>
             )}
@@ -436,7 +449,7 @@ export default function StudentDashboardPage() {
                     key={sub.subjectId}
                     className={`p-3.5 rounded-xl border transition-all ${
                       isShort
-                        ? 'border-rose-300 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/20'
+                        ? 'border-rose-200 bg-rose-50/40 dark:border-rose-900/60 dark:bg-rose-950/20'
                         : 'border-[var(--border)] bg-[var(--surface-2)]/30 hover:bg-[var(--surface-2)]/60'
                     }`}
                   >
@@ -469,22 +482,22 @@ export default function StudentDashboardPage() {
                     {/* Per-Subject Attendance Chip (Color, Icon, Label) */}
                     <div className="pt-2 border-t border-[var(--border)]/60 flex items-center justify-between">
                       {isShort ? (
-                        <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
-                          <AlertTriangle className="w-3 h-3 text-rose-600 dark:text-rose-400" />
+                        <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-50 text-rose-900 border border-rose-200 dark:bg-rose-950/50 dark:text-rose-200 dark:border-rose-800/70 shadow-2xs">
+                          <AlertTriangle className="w-3 h-3 text-rose-700 dark:text-rose-400" />
                           <span>Shortage (&lt;75%)</span>
                         </div>
                       ) : isWarning ? (
-                        <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
-                          <Clock className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                        <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-900 border border-amber-200 dark:bg-amber-950/50 dark:text-amber-200 dark:border-amber-800/70 shadow-2xs">
+                          <Clock className="w-3 h-3 text-amber-700 dark:text-amber-400" />
                           <span>Near Limit (75-80%)</span>
                         </div>
                       ) : (
-                        <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-                          <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                        <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-50 text-emerald-900 border border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-200 dark:border-emerald-800/70 shadow-2xs">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-700 dark:text-emerald-400" />
                           <span>Good Standing (≥75%)</span>
                         </div>
                       )}
-                      <span className="text-[10px] font-mono text-[var(--text-muted)]">
+                      <span className="text-[10px] font-mono text-[var(--text-muted)] font-semibold">
                         {isShort ? `Attend ${sub.metrics.classesNeededToRecover}` : `Can miss ${sub.metrics.classesAllowedToMiss}`}
                       </span>
                     </div>

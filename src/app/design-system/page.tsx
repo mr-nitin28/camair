@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import {
   Sun,
   Moon,
@@ -27,40 +28,47 @@ import {
   Info,
 } from 'lucide-react';
 
+import { Avatar } from '@/components/ui/avatar';
+import { Tooltip } from '@/components/ui/tooltip';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { ProgressRing } from '@/components/ui/progress-ring';
+import { StatCard } from '@/components/ui/stat-card';
+import { Breadcrumbs } from '@/components/ui/breadcrumbs';
+import { PageHeader } from '@/components/ui/page-header';
 import {
-  Avatar,
-  Tooltip,
-  StatusBadge,
-  ProgressRing,
-  StatCard,
-  Breadcrumbs,
-  PageHeader,
   Skeleton,
   SkeletonStat,
   SkeletonCard,
   SkeletonChart,
   SkeletonTable,
-  EmptyState,
-  ErrorState,
-  PermissionDenied,
-  Dialog,
-  ConfirmDialog,
-  Sheet,
-  Tabs,
-  TabList,
-  TabTrigger,
-  TabContent,
-  Stepper,
-  FormField,
-  Input,
-  Select,
-  Textarea,
-  ToastProvider,
-  useToast,
-  DataTable,
-  type Column,
-  CommandPalette,
-} from '@/components/ui';
+} from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { ErrorState } from '@/components/ui/error-state';
+import { PermissionDenied } from '@/components/ui/permission-denied';
+import { Dialog } from '@/components/ui/dialog';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { Sheet } from '@/components/ui/sheet';
+import { Tabs, TabList, TabTrigger, TabContent } from '@/components/ui/tabs';
+import { Stepper } from '@/components/ui/stepper';
+import { FormField } from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import { Select } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { ToastProvider, useToast } from '@/components/ui/toast';
+import type { Column } from '@/components/ui/data-table';
+
+const DataTable = dynamic(
+  () => import('@/components/ui/data-table').then((m) => m.DataTable),
+  {
+    ssr: false,
+    loading: () => <SkeletonTable rows={5} cols={6} />,
+  }
+) as unknown as <T extends Record<string, unknown>>(props: import('@/components/ui/data-table').DataTableProps<T>) => React.JSX.Element;
+
+const CommandPalette = dynamic(
+  () => import('@/components/ui/command-palette').then((m) => m.CommandPalette),
+  { ssr: false }
+);
 
 import {
   MOTION_DURATIONS,

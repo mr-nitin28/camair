@@ -17,6 +17,8 @@ import {
   Building2,
   CheckCircle2,
   BadgeCheck,
+  Sun,
+  Moon,
 } from 'lucide-react';
 
 export default function RegisterPage() {
@@ -40,13 +42,11 @@ export default function RegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Ensure clean light mode and prefetch auth/dashboard routes
+  const [isDark, setIsDark] = useState(false);
+
   useEffect(() => {
-    const root = document.documentElement;
-    const wasDark = root.classList.contains('dark');
-    if (wasDark) {
-      root.classList.remove('dark');
-      root.removeAttribute('data-theme');
+    if (typeof window !== 'undefined') {
+      setIsDark(document.documentElement.classList.contains('dark'));
     }
 
     router.prefetch('/login');
@@ -63,14 +63,21 @@ export default function RegisterPage() {
         router.push('/dashboard');
       }
     }
-
-    return () => {
-      if (typeof window !== 'undefined' && localStorage.getItem('theme') === 'dark') {
-        root.classList.add('dark');
-        root.setAttribute('data-theme', 'dark');
-      }
-    };
   }, [router]);
+
+  const toggleTheme = () => {
+    const nextDark = !isDark;
+    setIsDark(nextDark);
+    if (nextDark) {
+      document.documentElement.classList.add('dark');
+      document.documentElement.setAttribute('data-theme', 'dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.documentElement.removeAttribute('data-theme');
+      localStorage.setItem('theme', 'light');
+    }
+  };
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -136,7 +143,7 @@ export default function RegisterPage() {
           router.push(role === 'faculty' ? '/faculty' : '/dashboard');
         }, 1200);
       }
-    } catch (err: any) {
+    } catch {
       // Offline fallback
       localStorage.setItem('mock_user_role', role);
       localStorage.setItem('mock_user_name', fullName);
@@ -148,58 +155,75 @@ export default function RegisterPage() {
   };
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-white to-indigo-50/50 text-slate-900 relative overflow-hidden px-4 py-12">
-      {/* Ambient Classic Light Gradient Orbs */}
-      <div className="absolute -top-32 -left-32 w-80 h-80 rounded-full bg-indigo-200/40 blur-3xl pointer-events-none" />
-      <div className="absolute -bottom-32 -right-32 w-80 h-80 rounded-full bg-blue-200/40 blur-3xl pointer-events-none" />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[520px] h-[520px] rounded-full bg-indigo-100/30 blur-3xl pointer-events-none" />
+    <main className="min-h-screen flex items-center justify-center bg-[var(--bg)] text-[var(--text)] relative overflow-hidden px-4 py-12 transition-colors duration-200">
+      {/* Top Floating Controls */}
+      <div className="absolute top-6 right-6 z-20 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={toggleTheme}
+          className="p-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer"
+          aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          {isDark ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
+        </button>
+      </div>
+
+      {/* Ambient Gradient Orbs */}
+      <div className="absolute -top-32 -left-32 w-80 h-80 rounded-full bg-indigo-500/15 dark:bg-indigo-500/20 blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-32 -right-32 w-80 h-80 rounded-full bg-blue-500/15 dark:bg-teal-500/15 blur-3xl pointer-events-none" />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[520px] h-[520px] rounded-full bg-indigo-500/5 dark:bg-indigo-500/10 blur-3xl pointer-events-none" />
 
       {/* Subtle Grid Accent Pattern */}
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,#e2e8f033_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f033_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none" />
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,var(--border)_1px,transparent_1px),linear-gradient(to_bottom,var(--border)_1px,transparent_1px)] bg-[size:32px_32px] opacity-40 pointer-events-none" />
 
-      <div className="w-full max-w-lg bg-white/95 backdrop-blur-xl border border-slate-200/90 rounded-2xl p-7 sm:p-9 shadow-xl shadow-slate-200/60 relative z-10 transition-all duration-300">
+      <div className="w-full max-w-lg bg-[var(--surface)]/95 backdrop-blur-xl border border-[var(--border)] rounded-2xl p-7 sm:p-9 shadow-2xl relative z-10 transition-all duration-300">
         {/* Top Header */}
         <div className="flex flex-col items-center mb-6 text-center">
-          <div className="w-13 h-13 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-indigo-600/25 mb-4 text-white">
+          <div className="w-13 h-13 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-700 flex items-center justify-center shadow-lg shadow-indigo-600/25 mb-4 text-white">
             <GraduationCap className="w-7 h-7" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Create Your Account</h1>
-          <p className="text-xs sm:text-sm text-slate-500 mt-1 font-medium">
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-black tracking-tight text-[var(--text)]">Create Your Account</h1>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+              CampAI
+            </span>
+          </div>
+          <p className="text-xs sm:text-sm text-[var(--text-muted)] mt-1 font-medium">
             Join CampusOS Academic &amp; Experience Platform
           </p>
         </div>
 
         {/* Role Segmented Selector */}
-        <div className="p-1 bg-slate-100/90 rounded-xl flex items-center mb-6 border border-slate-200/70">
+        <div className="p-1 bg-[var(--surface-2)] rounded-xl flex items-center mb-6 border border-[var(--border)]">
           <button
             type="button"
             onClick={() => setRole('student')}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+            className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
               role === 'student'
-                ? 'bg-white text-indigo-700 shadow-sm border border-slate-200/60'
-                : 'text-slate-500 hover:text-slate-800'
+                ? 'bg-[var(--surface)] text-indigo-600 dark:text-indigo-400 shadow-sm border border-[var(--border)]'
+                : 'text-[var(--text-muted)] hover:text-[var(--text)]'
             }`}
           >
-            <GraduationCap className="w-4 h-4 text-indigo-600" />
-            Student Account
+            <GraduationCap className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            <span>Student Account</span>
           </button>
           <button
             type="button"
             onClick={() => setRole('faculty')}
-            className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+            className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
               role === 'faculty'
-                ? 'bg-white text-teal-700 shadow-sm border border-slate-200/60'
-                : 'text-slate-500 hover:text-slate-800'
+                ? 'bg-[var(--surface)] text-teal-600 dark:text-teal-400 shadow-sm border border-[var(--border)]'
+                : 'text-[var(--text-muted)] hover:text-[var(--text)]'
             }`}
           >
-            <User className="w-4 h-4 text-teal-600" />
-            Faculty / Staff
+            <User className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+            <span>Faculty / Staff</span>
           </button>
         </div>
 
         {/* Error Alert */}
         {error && (
-          <div className="mb-5 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl p-3 flex items-start gap-2.5 text-xs font-medium transition-all">
+          <div className="mb-5 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 rounded-xl p-3 flex items-start gap-2.5 text-xs font-medium transition-all">
             <AlertCircle className="w-4 h-4 mt-0.5 shrink-0 text-rose-500" />
             <span>{error}</span>
           </div>
@@ -207,8 +231,8 @@ export default function RegisterPage() {
 
         {/* Success Alert */}
         {success && (
-          <div className="mb-5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-3 flex items-start gap-2.5 text-xs font-medium transition-all">
-            <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-emerald-600" />
+          <div className="mb-5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-xl p-3 flex items-start gap-2.5 text-xs font-medium transition-all">
+            <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0 text-emerald-500" />
             <span>{success}</span>
           </div>
         )}
@@ -218,17 +242,17 @@ export default function RegisterPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Full Name */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label className="block text-xs font-bold text-[var(--text)] uppercase tracking-wider mb-1.5">
                 Full Name
               </label>
               <div className="relative">
-                <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)] pointer-events-none" />
                 <input
                   type="text"
                   placeholder="e.g. Aarav Sharma"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  className="w-full bg-white border border-slate-200 hover:border-slate-300 rounded-xl py-2.5 pl-10 pr-4 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/15 transition-all shadow-xs"
+                  className="w-full bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] rounded-xl py-2.5 pl-10 pr-4 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 transition-all shadow-xs"
                   disabled={loading}
                   required
                 />
@@ -237,17 +261,17 @@ export default function RegisterPage() {
 
             {/* Campus / Enrolment ID */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label className="block text-xs font-bold text-[var(--text)] uppercase tracking-wider mb-1.5">
                 {role === 'student' ? 'Student / Roll No.' : 'Faculty Employee ID'}
               </label>
               <div className="relative">
-                <BadgeCheck className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                <BadgeCheck className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)] pointer-events-none" />
                 <input
                   type="text"
                   placeholder={role === 'student' ? 'e.g. 2024-CS-042' : 'e.g. FAC-2024-09'}
                   value={campusId}
                   onChange={(e) => setCampusId(e.target.value)}
-                  className="w-full bg-white border border-slate-200 hover:border-slate-300 rounded-xl py-2.5 pl-10 pr-4 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/15 transition-all shadow-xs"
+                  className="w-full bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] rounded-xl py-2.5 pl-10 pr-4 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 transition-all shadow-xs"
                   disabled={loading}
                   required
                 />
@@ -255,36 +279,17 @@ export default function RegisterPage() {
             </div>
           </div>
 
-          {/* Email Address */}
+          {/* Department Dropdown */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-              Campus Email Address
+            <label className="block text-xs font-bold text-[var(--text)] uppercase tracking-wider mb-1.5">
+              Academic Department
             </label>
             <div className="relative">
-              <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-              <input
-                type="email"
-                placeholder={role === 'student' ? 'student@campusos.dev' : 'faculty@campusos.dev'}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-white border border-slate-200 hover:border-slate-300 rounded-xl py-2.5 pl-10 pr-4 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/15 transition-all shadow-xs"
-                disabled={loading}
-                required
-              />
-            </div>
-          </div>
-
-          {/* Department */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
-              Department
-            </label>
-            <div className="relative">
-              <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              <Building2 className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)] pointer-events-none" />
               <select
                 value={department}
                 onChange={(e) => setDepartment(e.target.value)}
-                className="w-full bg-white border border-slate-200 hover:border-slate-300 rounded-xl py-2.5 pl-10 pr-8 text-sm text-slate-900 focus:outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/15 transition-all shadow-xs appearance-none cursor-pointer"
+                className="w-full bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] rounded-xl py-2.5 pl-10 pr-4 text-sm text-[var(--text)] focus:outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 transition-all shadow-xs appearance-none cursor-pointer"
                 disabled={loading}
               >
                 <option value="Computer Science & Engineering">Computer Science &amp; Engineering</option>
@@ -297,56 +302,75 @@ export default function RegisterPage() {
             </div>
           </div>
 
-          {/* Password & Confirm Password */}
+          {/* Institutional Email */}
+          <div>
+            <label className="block text-xs font-bold text-[var(--text)] uppercase tracking-wider mb-1.5">
+              Institutional Email
+            </label>
+            <div className="relative">
+              <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)] pointer-events-none" />
+              <input
+                type="email"
+                placeholder={role === 'student' ? 'aarav.sharma@campusos.edu' : 'rajesh.rao@campusos.edu'}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] rounded-xl py-2.5 pl-10 pr-4 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 transition-all shadow-xs"
+                disabled={loading}
+                required
+              />
+            </div>
+          </div>
+
+          {/* Passwords Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Password */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label className="block text-xs font-bold text-[var(--text)] uppercase tracking-wider mb-1.5">
                 Password
               </label>
               <div className="relative">
-                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)] pointer-events-none" />
                 <input
                   type={showPassword ? 'text' : 'password'}
-                  placeholder="••••••••"
+                  placeholder="Min 6 characters"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-white border border-slate-200 hover:border-slate-300 rounded-xl py-2.5 pl-10 pr-10 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/15 transition-all shadow-xs"
+                  className="w-full bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] rounded-xl py-2.5 pl-10 pr-10 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 transition-all shadow-xs"
                   disabled={loading}
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-md transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text)] p-1 rounded-md transition-colors"
                   tabIndex={-1}
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
             </div>
 
+            {/* Confirm Password */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+              <label className="block text-xs font-bold text-[var(--text)] uppercase tracking-wider mb-1.5">
                 Confirm Password
               </label>
               <div className="relative">
-                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)] pointer-events-none" />
                 <input
                   type={showConfirmPassword ? 'text' : 'password'}
-                  placeholder="••••••••"
+                  placeholder="Repeat password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full bg-white border border-slate-200 hover:border-slate-300 rounded-xl py-2.5 pl-10 pr-10 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/15 transition-all shadow-xs"
+                  className="w-full bg-[var(--surface-2)] border border-[var(--border)] hover:border-[var(--border-strong)] rounded-xl py-2.5 pl-10 pr-10 text-sm text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-indigo-600 focus:ring-2 focus:ring-indigo-600/20 transition-all shadow-xs"
                   disabled={loading}
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 rounded-md transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text)] p-1 rounded-md transition-colors"
                   tabIndex={-1}
-                  aria-label={showConfirmPassword ? 'Hide confirm password' : 'Show confirm password'}
                 >
                   {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
@@ -354,37 +378,38 @@ export default function RegisterPage() {
             </div>
           </div>
 
-          {/* Submit Button */}
+          {/* Submit Action */}
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-semibold text-sm rounded-xl py-3 flex items-center justify-center gap-2 transition-all shadow-md shadow-indigo-600/20 hover:shadow-lg hover:shadow-indigo-600/30 disabled:opacity-50 disabled:cursor-not-allowed mt-3 cursor-pointer"
+            className="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold text-sm rounded-xl py-3 flex items-center justify-center gap-2 transition-all shadow-md shadow-indigo-600/20 hover:shadow-lg hover:shadow-indigo-600/30 disabled:opacity-50 disabled:cursor-not-allowed mt-4 cursor-pointer"
           >
             {loading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <>
-                Create Account <ArrowRight className="w-4 h-4" />
+                <span>Complete Registration</span>
+                <ArrowRight className="w-4 h-4" />
               </>
             )}
           </button>
         </form>
 
-        {/* Back to Sign In Link */}
-        <div className="mt-6 pt-5 border-t border-slate-100 text-center text-xs text-slate-600">
-          <span>Already registered with CampusOS?</span>{' '}
+        {/* Login Link */}
+        <div className="mt-6 pt-5 border-t border-[var(--border)] text-center text-xs text-[var(--text-muted)]">
+          <span>Already have an institutional account?</span>{' '}
           <Link
             href="/login"
-            className="font-semibold text-indigo-600 hover:text-indigo-700 hover:underline transition"
+            className="font-bold text-indigo-600 dark:text-indigo-400 hover:underline transition"
           >
-            Sign in
+            Sign In here
           </Link>
         </div>
 
         {/* Security Footnote */}
-        <div className="mt-4 flex items-center justify-center gap-1.5 text-[11px] text-slate-400">
-          <ShieldCheck className="w-3.5 h-3.5 text-indigo-500/80" />
-          <span>CampusOS Security • Enterprise Role-Based Access Control</span>
+        <div className="mt-4 flex items-center justify-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+          <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
+          <span>CampAI • Institutional Identity Verification</span>
         </div>
       </div>
     </main>

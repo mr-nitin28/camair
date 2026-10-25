@@ -97,12 +97,12 @@ export function ProgressRing({
       </svg>
 
       {showValue && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center text-center select-none pointer-events-none">
-          <span className="text-sm font-extrabold text-[var(--text)] tabular-nums tracking-tight">
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-center select-none pointer-events-none px-2">
+          <span className={`${size >= 120 ? 'text-2xl font-black' : size >= 80 ? 'text-base font-extrabold' : 'text-xs font-bold'} text-[var(--text)] tabular-nums tracking-tight`}>
             {clampedValue.toFixed(0)}%
           </span>
           {label && (
-            <span className="text-[9px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+            <span className={`${size >= 120 ? 'text-[10px] max-w-[85px]' : 'text-[8px] max-w-[65px]'} font-bold text-[var(--text-muted)] uppercase tracking-wider leading-tight mt-0.5`}>
               {label}
             </span>
           )}

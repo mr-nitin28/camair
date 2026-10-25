@@ -6,11 +6,16 @@ import Providers from "@/components/providers";
 const inter = Inter({
   variable: "--font-sans",
   subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "CampusOS Student Portal | Enterprise Student Experience Platform",
-  description: "Access academic summaries, track attendance, view grades, manage leave requests, raise doubts, and interact with campus service desks.",
+  title: {
+    default: "CampAI — CampusOS | Next-Gen AI Campus Operating System",
+    template: "%s | CampAI CampusOS",
+  },
+  description:
+    "An enterprise-grade, accessible, multi-tenant campus operating platform with Student, Faculty, and Admin personas, CamAI copilot, and sub-millisecond PostgreSQL workflows.",
 };
 
 export default function RootLayout({
@@ -19,8 +24,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${inter.variable} h-full antialiased`}>
-      <body className="font-sans min-h-full flex flex-col bg-slate-50 text-slate-900 selection:bg-indigo-100 selection:text-indigo-900">
+    <html lang="en" className={`${inter.variable} h-full antialiased`} suppressHydrationWarning>
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches)){document.documentElement.classList.add('dark');document.documentElement.setAttribute('data-theme','dark');}else{document.documentElement.classList.remove('dark');document.documentElement.removeAttribute('data-theme');}}catch(e){}})();`,
+          }}
+        />
+      </head>
+      <body className="font-sans min-h-full flex flex-col bg-[var(--bg)] text-[var(--text)] selection:bg-[var(--accent-soft)] selection:text-[var(--accent)] transition-colors duration-150">
         <Providers>{children}</Providers>
       </body>
     </html>

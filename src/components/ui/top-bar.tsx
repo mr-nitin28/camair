@@ -79,9 +79,11 @@ export function TopBar({
     setIsDark(nextDark);
     if (nextDark) {
       document.documentElement.classList.add('dark');
+      document.documentElement.setAttribute('data-theme', 'dark');
       localStorage.setItem('theme', 'dark');
     } else {
       document.documentElement.classList.remove('dark');
+      document.documentElement.removeAttribute('data-theme');
       localStorage.setItem('theme', 'light');
     }
   };
@@ -151,19 +153,19 @@ export function TopBar({
     switch (category) {
       case 'Result':
       case 'Exam':
-        return 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400';
+        return 'bg-emerald-50 text-emerald-800 border border-emerald-200/80 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800/60';
       case 'Fee':
-        return 'bg-amber-500/15 text-amber-600 dark:text-amber-400';
+        return 'bg-amber-50 text-amber-900 border border-amber-200/80 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800/60';
       case 'Leave':
-        return 'bg-sky-500/15 text-sky-600 dark:text-sky-400';
+        return 'bg-sky-50 text-sky-800 border border-sky-200/80 dark:bg-sky-950/50 dark:text-sky-300 dark:border-sky-800/60';
       case 'Attendance':
-        return 'bg-rose-500/15 text-rose-600 dark:text-rose-400';
+        return 'bg-rose-50 text-rose-800 border border-rose-200/80 dark:bg-rose-950/50 dark:text-rose-300 dark:border-rose-800/60';
       case 'Doubt':
-        return 'bg-purple-500/15 text-purple-600 dark:text-purple-400';
+        return 'bg-purple-50 text-purple-800 border border-purple-200/80 dark:bg-purple-950/50 dark:text-purple-300 dark:border-purple-800/60';
       case 'Notice':
-        return 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400';
+        return 'bg-indigo-50 text-indigo-800 border border-indigo-200/80 dark:bg-indigo-950/50 dark:text-indigo-300 dark:border-indigo-800/60';
       default:
-        return 'bg-[var(--surface-2)] text-[var(--text-muted)]';
+        return 'bg-slate-100 text-slate-800 border border-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700';
     }
   };
 
@@ -382,7 +384,7 @@ export function TopBar({
 
           {/* User Profile Dropdown Menu */}
           {isUserMenuOpen && (
-            <div className="absolute right-0 top-full mt-2 w-56 rounded-2xl bg-[var(--surface)] border border-[var(--border)] shadow-xl p-2 z-[var(--z-dropdown)] animate-in fade-in zoom-in-95 duration-150">
+            <div className="absolute right-0 top-full mt-2 w-64 rounded-2xl bg-[var(--surface)] border border-[var(--border)] shadow-xl p-2 z-[var(--z-dropdown)] animate-in fade-in zoom-in-95 duration-150">
               <div className="px-3 py-2 border-b border-[var(--border)]/60">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)] block">
                   Signed in as
@@ -393,6 +395,101 @@ export function TopBar({
                 <span className="text-[11px] text-[var(--text-muted)] block truncate font-mono mt-0.5">
                   {user.email || user.role}
                 </span>
+              </div>
+
+              {/* Quick Persona Switcher */}
+              <div className="py-1.5 border-b border-[var(--border)]/60">
+                <span className="px-3 text-[9px] font-extrabold uppercase tracking-widest text-[var(--text-muted)] block mb-1">
+                  Switch Persona
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    localStorage.setItem('mock_user_role', 'student');
+                    localStorage.setItem('mock_user_name', 'Aarav Sharma');
+                    setIsUserMenuOpen(false);
+                    router.push('/dashboard');
+                  }}
+                  className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-semibold text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer text-left"
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                    Student View
+                  </span>
+                  <span className="text-[10px] text-[var(--text-muted)] font-mono">/dashboard</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    localStorage.setItem('mock_user_role', 'faculty');
+                    localStorage.setItem('mock_user_name', 'Dr. Rajesh Rao');
+                    setIsUserMenuOpen(false);
+                    router.push('/faculty');
+                  }}
+                  className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-semibold text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer text-left"
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-teal-500" />
+                    Faculty Desk
+                  </span>
+                  <span className="text-[10px] text-[var(--text-muted)] font-mono">/faculty</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    localStorage.setItem('mock_user_role', 'admin');
+                    localStorage.setItem('mock_user_name', 'Dean Office Admin');
+                    setIsUserMenuOpen(false);
+                    router.push('/admin');
+                  }}
+                  className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-semibold text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer text-left"
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-purple-500" />
+                    Admin Center
+                  </span>
+                  <span className="text-[10px] text-[var(--text-muted)] font-mono">/admin</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsUserMenuOpen(false);
+                    router.push('/dashboard/camai');
+                  }}
+                  className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-semibold text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer text-left"
+                >
+                  <span className="flex items-center gap-2">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                    CamAI Copilot
+                  </span>
+                  <span className="text-[10px] text-[var(--text-muted)] font-mono">/camai</span>
+                </button>
+              </div>
+
+              {/* Tools & Links */}
+              <div className="py-1.5 border-b border-[var(--border)]/60">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsUserMenuOpen(false);
+                    router.push('/design-system');
+                  }}
+                  className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-semibold text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer text-left"
+                >
+                  <span>Design System</span>
+                  <span className="text-[10px] text-[var(--text-muted)] font-mono">/design-system</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsUserMenuOpen(false);
+                    router.push('/');
+                  }}
+                  className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-xs font-semibold text-[var(--text)] hover:bg-[var(--surface-2)] transition-colors cursor-pointer text-left"
+                >
+                  <span>Portal Home</span>
+                  <span className="text-[10px] text-[var(--text-muted)] font-mono">/</span>
+                </button>
               </div>
 
               {onLogout && (

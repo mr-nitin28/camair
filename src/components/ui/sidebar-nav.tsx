@@ -11,7 +11,6 @@ import {
   type LucideIcon 
 } from 'lucide-react';
 import { Tooltip } from './tooltip';
-import { Avatar } from './avatar';
 import { ConfirmDialog } from './confirm-dialog';
 
 export interface NavItem {
@@ -154,56 +153,8 @@ export function SidebarNav({
         ))}
       </nav>
 
-      {/* Footer: User Profile, Sign Out & Collapse Toggle */}
-      <div className="p-3 border-t border-[var(--border)] shrink-0 space-y-2 bg-[var(--surface)]">
-        {/* User Card when Expanded */}
-        {user && !isCollapsed && (
-          <div className="flex items-center gap-2.5 p-2 rounded-xl bg-[var(--surface-2)]/60 border border-[var(--border)]/60">
-            <Avatar
-              name={user.name}
-              src={user.avatarUrl}
-              size="sm"
-              status="online"
-            />
-            <div className="min-w-0 flex-1 text-left">
-              <span className="text-xs font-bold text-[var(--text)] block truncate leading-tight">
-                {user.name}
-              </span>
-              <span className="text-[10px] font-semibold text-[var(--text-muted)] block truncate mt-0.5">
-                {user.role}
-              </span>
-            </div>
-            {onLogout && (
-              <Tooltip content="Sign Out" side="top">
-                <button
-                  type="button"
-                  onClick={() => setIsLogoutConfirmOpen(true)}
-                  className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-rose-600 hover:bg-rose-500/10 active:scale-95 transition-all cursor-pointer"
-                  aria-label="Sign Out"
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
-              </Tooltip>
-            )}
-          </div>
-        )}
-
-        {/* User Avatar when Collapsed (Rail) */}
-        {user && isCollapsed && (
-          <div className="flex justify-center">
-            <Tooltip content={`${user.name} (${user.role})`} side="right">
-              <div className="p-1 cursor-default">
-                <Avatar
-                  name={user.name}
-                  src={user.avatarUrl}
-                  size="sm"
-                  status="online"
-                />
-              </div>
-            </Tooltip>
-          </div>
-        )}
-
+      {/* Footer: Sign Out & Collapse Toggle */}
+      <div className="p-3 border-t border-[var(--border)] shrink-0 space-y-1.5 bg-[var(--surface)]">
         {/* Dedicated Sign Out Button when Expanded */}
         {!isCollapsed && onLogout && (
           <button
